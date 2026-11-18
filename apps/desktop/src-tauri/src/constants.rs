@@ -12,3 +12,6 @@ pub const SNAPSHOT_EVENT: &str = "downloads:snapshot";
 
 /// Event carrying the download progress of one helper tool.
 pub const TOOL_PROGRESS_EVENT: &str = "tools:progress";
+
+/// Event carrying one job that has just finished.
+pub const FINISHED_EVENT: &str = "downloads:finished";

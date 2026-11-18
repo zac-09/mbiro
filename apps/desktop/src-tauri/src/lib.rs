@@ -1,27 +1,32 @@
-//! The Rust core. It owns the engine process and the list of jobs; the window
-//! only sends commands and renders the events sent from here.
+//! The Rust core. It owns the engines and the job list; the window only sends
+//! commands and renders the events sent from here.
 
 mod browsers;
 mod constants;
 pub mod engine;
 mod ipc;
+pub mod jobs;
 mod strings;
 pub mod tools;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri::{AppHandle, Emitter, Manager as _, RunEvent, State};
 use url::Url;
 
 use engine::aria2::Aria2Engine;
 use engine::ytdlp::{ToolPaths, YtDlpEngine};
-use engine::{AddRequest, BrowserContext, Engine, JobStatus, Secret, DEFAULT_CONNECTIONS};
+use engine::{BrowserContext, Secret};
+use jobs::{JobView, Kind, Manager, NewJob};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// How many downloads run at once until Settings exists.
+const DEFAULT_MAX_CONCURRENT: usize = 3;
+const NETWORK_RETRY_DELAY: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
@@ -30,72 +35,31 @@ enum EngineHealth {
     Failed { reason: String },
 }
 
-/// Which engine a job belongs to.
-#[derive(Clone, Copy, PartialEq)]
-enum Kind {
-    File,
-    Video,
-}
-
-#[derive(Clone)]
-struct JobRef {
-    kind: Kind,
-    id: String,
-}
-
 struct AppState {
-    engine: Option<Arc<Aria2Engine>>,
+    manager: Manager,
     health: EngineHealth,
-    /// Present once the video tools are installed.
-    video: Mutex<Option<Arc<YtDlpEngine>>>,
     tools_dir: PathBuf,
     fetching_tools: AtomicBool,
-    download_dir: Option<PathBuf>,
-    /// The jobs this run knows about, oldest first.
-    jobs: Mutex<Vec<JobRef>>,
-    /// What the window was last told.
-    snapshot: Mutex<Vec<JobStatus>>,
 }
 
 impl AppState {
-    fn files(&self) -> Result<Arc<Aria2Engine>, String> {
-        self.engine
-            .clone()
-            .ok_or_else(|| strings::ENGINE_NOT_RUNNING.to_owned())
+    fn video_engine_if_ready(&self) -> Option<Arc<YtDlpEngine>> {
+        video_engine_if_ready(&self.tools_dir)
     }
+}
 
-    fn videos(&self) -> Result<Arc<YtDlpEngine>, String> {
-        let video = self.video.lock().expect("video lock").clone();
-        video.ok_or_else(|| strings::TOOLS_MISSING.to_owned())
-    }
-
-    fn kind_of(&self, id: &str) -> Option<Kind> {
-        let jobs = self.jobs.lock().expect("jobs lock");
-        jobs.iter().find(|job| job.id == id).map(|job| job.kind)
-    }
-
-    fn track(&self, kind: Kind, id: &str) {
-        self.jobs.lock().expect("jobs lock").push(JobRef {
-            kind,
-            id: id.to_owned(),
-        });
-    }
-
-    /// Creates the video engine if every tool is in place.
-    fn enable_video_if_ready(&self) {
-        let root = &self.tools_dir;
-        if tools::ALL.iter().all(|tool| tool.is_installed(root)) {
-            let paths = ToolPaths {
+/// The video engine, if every tool it needs is in place.
+fn video_engine_if_ready(root: &std::path::Path) -> Option<Arc<YtDlpEngine>> {
+    tools::ALL
+        .iter()
+        .all(|tool| tool.is_installed(root))
+        .then(|| {
+            Arc::new(YtDlpEngine::new(ToolPaths {
                 yt_dlp: tools::YT_DLP.executable_path(root),
                 deno: tools::DENO.executable_path(root),
                 ffmpeg: tools::FFMPEG.executable_path(root),
-            };
-            let mut video = self.video.lock().expect("video lock");
-            if video.is_none() {
-                *video = Some(Arc::new(YtDlpEngine::new(paths)));
-            }
-        }
-    }
+            }))
+        })
 }
 
 #[tauri::command]
@@ -104,8 +68,8 @@ fn engine_health(state: State<'_, AppState>) -> EngineHealth {
 }
 
 #[tauri::command]
-fn list_downloads(state: State<'_, AppState>) -> Vec<JobStatus> {
-    state.snapshot.lock().expect("snapshot lock").clone()
+fn list_downloads(state: State<'_, AppState>) -> Result<Vec<JobView>, String> {
+    state.manager.snapshot()
 }
 
 /// Why a download could not be started.
@@ -113,9 +77,9 @@ enum AddError {
     InvalidUrl,
     UnsupportedScheme,
     InvalidContext,
-    NoDownloadFolder,
     EngineDown,
-    Engine(String),
+    ToolsMissing,
+    Storage(String),
 }
 
 impl AddError {
@@ -125,9 +89,9 @@ impl AddError {
             Self::InvalidUrl => strings::URL_INVALID.to_owned(),
             Self::UnsupportedScheme => strings::URL_SCHEME_UNSUPPORTED.to_owned(),
             Self::InvalidContext => strings::REQUEST_INVALID.to_owned(),
-            Self::NoDownloadFolder => strings::DOWNLOAD_FOLDER_MISSING.to_owned(),
             Self::EngineDown => strings::ENGINE_NOT_RUNNING.to_owned(),
-            Self::Engine(reason) => reason,
+            Self::ToolsMissing => strings::TOOLS_MISSING.to_owned(),
+            Self::Storage(reason) => reason,
         }
     }
 
@@ -136,8 +100,8 @@ impl AddError {
         match self {
             Self::InvalidUrl | Self::UnsupportedScheme => ipc::RefusalCode::UnsupportedUrl,
             Self::InvalidContext => ipc::RefusalCode::InvalidMessage,
-            Self::NoDownloadFolder | Self::EngineDown => ipc::RefusalCode::EngineUnavailable,
-            Self::Engine(_) => ipc::RefusalCode::Rejected,
+            Self::EngineDown | Self::ToolsMissing => ipc::RefusalCode::EngineUnavailable,
+            Self::Storage(_) => ipc::RefusalCode::Rejected,
         }
     }
 }
@@ -163,15 +127,16 @@ fn safe_filename(suggested: &str) -> Option<String> {
 }
 
 /// What is known about a download before it is checked.
-#[derive(Default)]
 struct DownloadSpec {
+    kind: Kind,
     url: String,
     filename: Option<String>,
+    connections: Option<u8>,
     context: BrowserContext,
 }
 
-/// The one way a download starts, whether asked for by the window or a browser.
-async fn start_download(state: &AppState, spec: DownloadSpec) -> Result<String, AddError> {
+/// The one way a download enters the queue, whether asked for by the window or a browser.
+fn queue_download(state: &AppState, spec: DownloadSpec) -> Result<i64, AddError> {
     let url = Url::parse(spec.url.trim()).map_err(|_| AddError::InvalidUrl)?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(AddError::UnsupportedScheme);
@@ -189,39 +154,103 @@ async fn start_download(state: &AppState, spec: DownloadSpec) -> Result<String, 
     if !headers.into_iter().flatten().all(header_safe) {
         return Err(AddError::InvalidContext);
     }
-    let dir = state
-        .download_dir
-        .clone()
-        .ok_or(AddError::NoDownloadFolder)?;
-    let engine = state.engine.as_ref().ok_or(AddError::EngineDown)?;
-    let request = AddRequest {
+    match spec.kind {
+        Kind::File if state.manager.file_engine().is_none() => return Err(AddError::EngineDown),
+        Kind::Video if !state.manager.has_video_engine() => return Err(AddError::ToolsMissing),
+        _ => {}
+    }
+    let job = NewJob {
+        kind: spec.kind,
         url,
-        dir,
-        connections: DEFAULT_CONNECTIONS,
+        dir: None,
         filename: spec.filename.as_deref().and_then(safe_filename),
+        connections: spec.connections,
         context: BrowserContext {
             referrer,
             user_agent,
             cookies,
         },
     };
-    let id = engine
-        .add(request)
-        .await
-        .map_err(|e| AddError::Engine(e.to_string()))?;
-    state.track(Kind::File, &id);
-    Ok(id)
+    state.manager.add(job).map_err(AddError::Storage)
 }
 
 #[tauri::command]
-async fn add_download(state: State<'_, AppState>, url: String) -> Result<String, String> {
+fn add_download(
+    state: State<'_, AppState>,
+    url: String,
+    connections: Option<u8>,
+) -> Result<i64, String> {
     let spec = DownloadSpec {
+        kind: Kind::File,
         url,
-        ..Default::default()
+        filename: None,
+        connections,
+        context: BrowserContext::default(),
     };
-    start_download(&state, spec)
-        .await
-        .map_err(AddError::message)
+    queue_download(&state, spec).map_err(AddError::message)
+}
+
+/// Hands a page address to yt-dlp. Which pages work is yt-dlp's business.
+#[tauri::command]
+fn add_video(state: State<'_, AppState>, url: String) -> Result<i64, String> {
+    let spec = DownloadSpec {
+        kind: Kind::Video,
+        url,
+        filename: None,
+        connections: Some(1),
+        context: BrowserContext::default(),
+    };
+    queue_download(&state, spec).map_err(AddError::message)
+}
+
+#[tauri::command]
+async fn pause_download(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.manager.pause(id).await
+}
+
+#[tauri::command]
+fn resume_download(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.manager.resume(id)
+}
+
+#[tauri::command]
+fn retry_download(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.manager.retry(id)
+}
+
+#[tauri::command]
+async fn remove_download(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    state.manager.remove(id).await
+}
+
+#[tauri::command]
+async fn pause_all(state: State<'_, AppState>) -> Result<(), String> {
+    state.manager.pause_all().await
+}
+
+#[tauri::command]
+fn resume_all(state: State<'_, AppState>) -> Result<(), String> {
+    state.manager.resume_all()
+}
+
+/// Shows a finished download in the Finder.
+#[tauri::command]
+fn show_file(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let jobs = state.manager.snapshot()?;
+    let job = jobs
+        .iter()
+        .find(|job| job.id == id)
+        .ok_or(strings::FILE_MISSING)?;
+    let path = job.path();
+    if !path.exists() {
+        return Err(strings::FILE_MISSING.to_owned());
+    }
+    std::process::Command::new("/usr/bin/open")
+        .arg("-R")
+        .arg(path)
+        .status()
+        .map(drop)
+        .map_err(|_| strings::FILE_MISSING.to_owned())
 }
 
 /// Answers the native messaging host for the life of the app.
@@ -231,16 +260,18 @@ async fn serve_browsers(app: AppHandle, listener: tokio::net::UnixListener) {
         async move {
             let ipc::Request::Download(request) = request;
             let spec = DownloadSpec {
+                kind: Kind::File,
                 url: request.url,
                 filename: request.filename,
+                connections: None,
                 context: BrowserContext {
                     referrer: request.referrer,
                     user_agent: request.user_agent,
                     cookies: request.cookies,
                 },
             };
-            match start_download(&app.state::<AppState>(), spec).await {
-                Ok(id) => ipc::Ack::accepted(id),
+            match queue_download(&app.state::<AppState>(), spec) {
+                Ok(id) => ipc::Ack::accepted(id.to_string()),
                 Err(error) => ipc::Ack::refused(error.code()),
             }
         }
@@ -304,14 +335,12 @@ async fn fetch_tools(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     let mut outcome = Ok(());
     for tool in tools::ALL {
         let report = |received, total| {
-            let _ = app.emit(
-                constants::TOOL_PROGRESS_EVENT,
-                ToolProgress {
-                    name: tool.name,
-                    received,
-                    total,
-                },
-            );
+            let progress = ToolProgress {
+                name: tool.name,
+                received,
+                total,
+            };
+            let _ = app.emit(constants::TOOL_PROGRESS_EVENT, progress);
         };
         if let Err(error) = tool.install(&state.tools_dir, report).await {
             outcome = Err(match error {
@@ -322,94 +351,27 @@ async fn fetch_tools(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
         }
     }
     state.fetching_tools.store(false, Ordering::SeqCst);
-    state.enable_video_if_ready();
+    if let Some(engine) = state.video_engine_if_ready() {
+        state.manager.set_video_engine(engine);
+    }
     outcome
 }
 
-/// Hands a page address to yt-dlp. Which pages work is yt-dlp's business.
-#[tauri::command]
-async fn add_video(state: State<'_, AppState>, url: String) -> Result<String, String> {
-    let url = Url::parse(url.trim()).map_err(|_| strings::URL_INVALID.to_owned())?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(strings::URL_SCHEME_UNSUPPORTED.to_owned());
-    }
-    let dir = state
-        .download_dir
-        .clone()
-        .ok_or_else(|| strings::DOWNLOAD_FOLDER_MISSING.to_owned())?;
-    let request = AddRequest {
-        url,
-        dir,
-        connections: 1,
-        filename: None,
-        context: BrowserContext::default(),
-    };
-    let id = state
-        .videos()?
-        .add(request)
-        .await
-        .map_err(|e| e.to_string())?;
-    state.track(Kind::Video, &id);
-    Ok(id)
-}
-
-#[tauri::command]
-async fn pause_download(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    match state.kind_of(&id) {
-        Some(Kind::Video) => state.videos()?.pause(&id).await,
-        _ => state.files()?.pause(&id).await,
-    }
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn resume_download(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    match state.kind_of(&id) {
-        Some(Kind::Video) => state.videos()?.resume(&id).await,
-        _ => state.files()?.resume(&id).await,
-    }
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn remove_download(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    match state.kind_of(&id) {
-        Some(Kind::Video) => state.videos()?.remove(&id).await,
-        _ => state.files()?.remove(&id).await,
-    }
-    .map_err(|e| e.to_string())?;
-    state
-        .jobs
-        .lock()
-        .expect("jobs lock")
-        .retain(|job| job.id != id);
-    Ok(())
-}
-
-/// Asks the engines about every job once a second and tells the window.
+/// Turns the crank once a second and tells the window what the list looks like.
 /// Runs for the life of the app, with or without a window.
-async fn poll_jobs(app: AppHandle) {
+async fn run_queue(app: AppHandle) {
     let mut tick = tokio::time::interval(POLL_INTERVAL);
     loop {
         tick.tick().await;
         let state = app.state::<AppState>();
-        let jobs = state.jobs.lock().expect("jobs lock").clone();
-        let mut snapshot = Vec::with_capacity(jobs.len());
-        for job in &jobs {
-            let status = match job.kind {
-                Kind::File => match state.files() {
-                    Ok(engine) => engine.status(&job.id).await.ok(),
-                    Err(_) => None,
-                },
-                Kind::Video => match state.videos() {
-                    Ok(engine) => engine.status(&job.id).await.ok(),
-                    Err(_) => None,
-                },
-            };
-            snapshot.extend(status);
+        if let Ok(finished) = state.manager.tick().await {
+            for job in finished {
+                let _ = app.emit(constants::FINISHED_EVENT, job);
+            }
         }
-        *state.snapshot.lock().expect("snapshot lock") = snapshot.clone();
-        let _ = app.emit(constants::SNAPSHOT_EVENT, snapshot);
+        if let Ok(snapshot) = state.manager.snapshot() {
+            let _ = app.emit(constants::SNAPSHOT_EVENT, snapshot);
+        }
     }
 }
 
@@ -425,15 +387,14 @@ fn sidecar_path(name: &str) -> std::io::Result<PathBuf> {
 pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
-            let run_dir = app.path().app_data_dir()?.join("run");
+            let data_dir = app.path().app_data_dir()?;
             let started = tauri::async_runtime::block_on(async {
                 let binary = sidecar_path(constants::ARIA2_BINARY).map_err(|e| e.to_string())?;
-                Aria2Engine::start(&binary, &run_dir)
+                Aria2Engine::start(&binary, &data_dir.join("run"))
                     .await
                     .map_err(|e| e.to_string())
             })
             .map(Arc::new);
-
             let (engine, health) = match started {
                 Ok(engine) => {
                     let version = engine.version().to_owned();
@@ -442,40 +403,48 @@ pub fn run() {
                 Err(reason) => (None, EngineHealth::Failed { reason }),
             };
 
-            let state = AppState {
-                engine,
-                health,
-                video: Mutex::new(None),
-                tools_dir: app.path().app_data_dir()?.join("tools"),
-                fetching_tools: AtomicBool::new(false),
-                download_dir: app.path().download_dir().ok(),
-                jobs: Mutex::new(Vec::new()),
-                snapshot: Mutex::new(Vec::new()),
+            let tools_dir = data_dir.join("tools");
+            let config = jobs::Config {
+                db_path: data_dir.join("jobs.sqlite"),
+                default_dir: app.path().download_dir()?,
+                max_concurrent: DEFAULT_MAX_CONCURRENT,
+                retry_delay: NETWORK_RETRY_DELAY,
             };
-            state.enable_video_if_ready();
-            app.manage(state);
+            let manager = Manager::open(config, engine, video_engine_if_ready(&tools_dir))?;
+            app.manage(AppState {
+                manager,
+                health,
+                tools_dir,
+                fetching_tools: AtomicBool::new(false),
+            });
 
             start_browser_integration(app.handle());
-            tauri::async_runtime::spawn(poll_jobs(app.handle().clone()));
+            tauri::async_runtime::spawn(run_queue(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             engine_health,
             list_downloads,
             add_download,
+            add_video,
             pause_download,
             resume_download,
+            retry_download,
             remove_download,
+            pause_all,
+            resume_all,
+            show_file,
             tools_status,
             fetch_tools,
-            add_video,
         ])
         .build(tauri::generate_context!())
         .expect("the app could not be built");
 
     app.run(|app, event| {
         if let RunEvent::Exit = event {
-            if let Some(engine) = app.state::<AppState>().engine.clone() {
+            // aria2 saves its control files on the way out, so partial
+            // downloads resume after the next launch.
+            if let Some(engine) = app.state::<AppState>().manager.file_engine().cloned() {
                 tauri::async_runtime::block_on(engine.shutdown());
             }
         }

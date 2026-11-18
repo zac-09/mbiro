@@ -23,3 +23,9 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "n
 # Checks every fetched tool against its pinned checksum before it is unpacked.
 sha2 = "0.11.1"
 url = "2"
+# The job list. SQLite is compiled in, so its version is the one pinned here.
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+
+[dev-dependencies]
+# Tests read the job list directly to check what is stored.
+rusqlite = { version = "0.43.0", features = ["bundled"] }

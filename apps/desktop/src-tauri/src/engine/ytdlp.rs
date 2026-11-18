@@ -111,6 +111,7 @@ impl Engine for YtDlpEngine {
             speed_bps: 0,
             connections: 1,
             error: None,
+            retryable: false,
         };
 
         let (jobs, job_id) = (self.jobs.clone(), id.clone());

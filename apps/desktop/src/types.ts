@@ -2,7 +2,7 @@
 export type JobState = "queued" | "active" | "paused" | "done" | "failed";
 
 export interface JobStatus {
-  id: string;
+  id: number;
   state: JobState;
   name: string;
   totalBytes: number;

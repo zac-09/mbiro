@@ -11,16 +11,22 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use super::{AddRequest, Engine, EngineError, JobState, JobStatus, MAX_CONNECTIONS};
 
 const START_ATTEMPTS: u32 = 3;
 const READY_POLLS: u32 = 50;
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+/// aria2 waits about three seconds after a shutdown request before it exits.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(8);
 
-const STATUS_KEYS: [&str; 7] = [
+/// aria2 exit codes that mean "the network let us down", not "this link is bad":
+/// 2 timed out, 6 network problem, 19 name lookup failed.
+const NETWORK_ERROR_CODES: [&str; 3] = ["2", "6", "19"];
+
+const STATUS_KEYS: [&str; 8] = [
+    "errorCode",
     "gid",
     "status",
     "totalLength",
@@ -30,12 +36,19 @@ const STATUS_KEYS: [&str; 7] = [
     "errorMessage",
 ];
 
-// No `Debug`: this holds the RPC secret, which must never reach a log.
-pub struct Aria2Engine {
-    child: Mutex<Child>,
-    http: reqwest::Client,
+/// One running `aria2c` and how to reach it.
+struct Process {
+    child: Child,
     endpoint: String,
     secret: String,
+}
+
+// No `Debug`: this holds the RPC secret, which must never reach a log.
+pub struct Aria2Engine {
+    binary: PathBuf,
+    run_dir: PathBuf,
+    http: reqwest::Client,
+    process: RwLock<Process>,
     version: String,
 }
 
@@ -45,120 +58,201 @@ impl Aria2Engine {
     /// `run_dir` briefly holds a private config file carrying the secret, so the
     /// secret never appears in the process list.
     pub async fn start(binary: &Path, run_dir: &Path) -> Result<Self, EngineError> {
-        let mut last = EngineError::Start("aria2c was not started".into());
-        // The free port is chosen here and bound by aria2 a moment later; another
-        // process can take it in between, so try more than once.
-        for _ in 0..START_ATTEMPTS {
-            match Self::try_start(binary, run_dir).await {
-                Ok(engine) => return Ok(engine),
-                Err(error) => last = error,
-            }
-        }
-        Err(last)
-    }
-
-    async fn try_start(binary: &Path, run_dir: &Path) -> Result<Self, EngineError> {
-        let port = free_local_port()?;
-        let secret = random_secret()?;
-        let conf = SecretFile::create(run_dir, &format!("rpc-secret={secret}\n"))?;
-
-        let child = Command::new(binary)
-            .arg(format!("--conf-path={}", conf.path.display()))
-            .arg("--enable-rpc=true")
-            .arg("--rpc-listen-all=false")
-            .arg(format!("--rpc-listen-port={port}"))
-            .arg("--rpc-allow-origin-all=false")
-            // aria2 exits by itself if the app dies without cleaning up.
-            .arg(format!("--stop-with-process={}", std::process::id()))
-            .arg("--no-netrc=true")
-            .arg("--quiet=true")
-            .arg("--console-log-level=error")
-            .arg("--summary-interval=0")
-            .arg("--continue=true")
-            .arg("--file-allocation=none")
-            .arg("--min-split-size=1M")
-            .arg(format!("--max-connection-per-server={MAX_CONNECTIONS}"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| EngineError::Start(format!("could not launch aria2c: {e}")))?;
-
         let http = reqwest::Client::builder()
             // Never send loopback RPC through a system proxy.
             .no_proxy()
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| EngineError::Start(format!("could not build the RPC client: {e}")))?;
-
-        // From here on, dropping `engine` kills the child.
-        let mut engine = Self {
-            child: Mutex::new(child),
+        let (process, version) = launch(binary, run_dir, &http).await?;
+        Ok(Self {
+            binary: binary.to_owned(),
+            run_dir: run_dir.to_owned(),
             http,
-            endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
-            secret,
-            version: String::new(),
-        };
-
-        for _ in 0..READY_POLLS {
-            if let Ok(Some(status)) = engine.child.lock().await.try_wait() {
-                return Err(EngineError::Start(format!("aria2c exited early: {status}")));
-            }
-            if let Ok(reply) = engine.call("aria2.getVersion", vec![]).await {
-                engine.version = reply["version"].as_str().unwrap_or_default().to_owned();
-                return Ok(engine);
-            }
-            tokio::time::sleep(READY_POLL_INTERVAL).await;
-        }
-        Err(EngineError::Start(
-            "aria2c did not answer on its RPC port".into(),
-        ))
+            process: RwLock::new(process),
+            version,
+        })
     }
 
     pub fn version(&self) -> &str {
         &self.version
     }
 
+    /// Starts a new `aria2c` if the current one has died. Returns whether it
+    /// did: after a restart aria2 has forgotten every download, and the caller
+    /// must add again whatever it still wants.
+    pub async fn restart_if_dead(&self) -> Result<bool, EngineError> {
+        let mut process = self.process.write().await;
+        if matches!(process.child.try_wait(), Ok(None)) {
+            return Ok(false);
+        }
+        let (fresh, _) = launch(&self.binary, &self.run_dir, &self.http).await?;
+        *process = fresh;
+        Ok(true)
+    }
+
     /// Asks aria2 to save its control files and exit, then makes sure it is gone.
     pub async fn shutdown(&self) {
-        let _ = self.call("aria2.shutdown", vec![]).await;
-        let mut child = self.child.lock().await;
-        if tokio::time::timeout(SHUTDOWN_GRACE, child.wait())
+        // The forced form still saves control files; it only skips slow goodbyes.
+        let _ = self.call("aria2.forceShutdown", vec![]).await;
+        let mut process = self.process.write().await;
+        if tokio::time::timeout(SHUTDOWN_GRACE, process.child.wait())
             .await
             .is_err()
         {
-            let _ = child.kill().await;
+            let _ = process.child.kill().await;
         }
+    }
+
+    /// Stops aria2 at once, as a crash would. For tests of recovery.
+    #[doc(hidden)]
+    pub async fn kill_for_test(&self) {
+        let mut process = self.process.write().await;
+        let _ = process.child.kill().await;
+    }
+
+    /// Caps the total download speed. `None` removes the cap.
+    pub async fn set_speed_limit(&self, bytes_per_second: Option<u64>) -> Result<(), EngineError> {
+        let limit = bytes_per_second.unwrap_or(0).to_string();
+        let options = json!({ "max-overall-download-limit": limit });
+        self.call("aria2.changeGlobalOption", vec![options])
+            .await
+            .map(drop)
     }
 
     async fn call(&self, method: &str, params: Vec<Value>) -> Result<Value, EngineError> {
-        let mut all = Vec::with_capacity(params.len() + 1);
-        all.push(Value::String(format!("token:{}", self.secret)));
-        all.extend(params);
-        let body = json!({ "jsonrpc": "2.0", "id": "mbiro", "method": method, "params": all });
-
-        // Errors are reported without the request, which carries the secret.
-        let transport = |e: reqwest::Error| EngineError::Transport(e.without_url().to_string());
-        let reply: Value = self
-            .http
-            .post(&self.endpoint)
-            .json(&body)
-            .send()
-            .await
-            .map_err(transport)?
-            .json()
-            .await
-            .map_err(transport)?;
-
-        if let Some(error) = reply.get("error") {
-            let message = error["message"]
-                .as_str()
-                .unwrap_or("aria2 reported an error");
-            return Err(EngineError::Rejected(message.to_owned()));
-        }
-        Ok(reply["result"].clone())
+        let (endpoint, secret) = {
+            let process = self.process.read().await;
+            (process.endpoint.clone(), process.secret.clone())
+        };
+        rpc(&self.http, &endpoint, &secret, method, params).await
     }
+}
+
+/// Starts one `aria2c` and waits until it answers.
+async fn launch(
+    binary: &Path,
+    run_dir: &Path,
+    http: &reqwest::Client,
+) -> Result<(Process, String), EngineError> {
+    let mut last = EngineError::Start("aria2c was not started".into());
+    // The free port is chosen here and bound by aria2 a moment later; another
+    // process can take it in between, so try more than once.
+    for _ in 0..START_ATTEMPTS {
+        match try_launch(binary, run_dir, http).await {
+            Ok(started) => return Ok(started),
+            Err(error) => last = error,
+        }
+    }
+    Err(last)
+}
+
+async fn try_launch(
+    binary: &Path,
+    run_dir: &Path,
+    http: &reqwest::Client,
+) -> Result<(Process, String), EngineError> {
+    let port = free_local_port()?;
+    let secret = random_secret()?;
+    let conf = SecretFile::create(run_dir, &format!("rpc-secret={secret}\n"))?;
+
+    let child = Command::new(binary)
+        .arg(format!("--conf-path={}", conf.path.display()))
+        .arg("--enable-rpc=true")
+        .arg("--rpc-listen-all=false")
+        .arg(format!("--rpc-listen-port={port}"))
+        .arg("--rpc-allow-origin-all=false")
+        // aria2 exits by itself if the app dies without cleaning up.
+        .arg(format!("--stop-with-process={}", std::process::id()))
+        .arg("--no-netrc=true")
+        .arg("--quiet=true")
+        .arg("--console-log-level=error")
+        .arg("--summary-interval=0")
+        // aria2's defaults are what we want for names: a download with a
+        // control file beside it is resumed, and a new download never touches
+        // an unrelated file that happens to have the same name (it is saved
+        // as "name.1.ext" instead). `--continue` is deliberately left off: it
+        // would treat any existing file as a partial copy of the new one.
+        .arg("--file-allocation=none")
+        .arg("--min-split-size=1M")
+        .arg(format!("--max-connection-per-server={MAX_CONNECTIONS}"))
+        // The queue lives in the job manager; aria2 runs whatever it is given.
+        .arg("--max-concurrent-downloads=64")
+        // Ride out a dropped network: keep trying, and save progress often so
+        // little is lost if the app is killed.
+        .arg("--max-tries=0")
+        .arg("--retry-wait=5")
+        .arg("--connect-timeout=15")
+        .arg("--timeout=30")
+        .arg("--max-file-not-found=3")
+        .arg("--auto-save-interval=5")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| EngineError::Start(format!("could not launch aria2c: {e}")))?;
+
+    // From here on, dropping `process` kills the child.
+    let mut process = Process {
+        child,
+        endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
+        secret,
+    };
+    for _ in 0..READY_POLLS {
+        if let Ok(Some(status)) = process.child.try_wait() {
+            return Err(EngineError::Start(format!("aria2c exited early: {status}")));
+        }
+        let reply = rpc(
+            http,
+            &process.endpoint,
+            &process.secret,
+            "aria2.getVersion",
+            vec![],
+        )
+        .await;
+        if let Ok(reply) = reply {
+            let version = reply["version"].as_str().unwrap_or_default().to_owned();
+            return Ok((process, version));
+        }
+        tokio::time::sleep(READY_POLL_INTERVAL).await;
+    }
+    Err(EngineError::Start(
+        "aria2c did not answer on its RPC port".into(),
+    ))
+}
+
+async fn rpc(
+    http: &reqwest::Client,
+    endpoint: &str,
+    secret: &str,
+    method: &str,
+    params: Vec<Value>,
+) -> Result<Value, EngineError> {
+    let mut all = Vec::with_capacity(params.len() + 1);
+    all.push(Value::String(format!("token:{secret}")));
+    all.extend(params);
+    let body = json!({ "jsonrpc": "2.0", "id": "mbiro", "method": method, "params": all });
+
+    // Errors are reported without the request, which carries the secret.
+    let transport = |e: reqwest::Error| EngineError::Transport(e.without_url().to_string());
+    let reply: Value = http
+        .post(endpoint)
+        .json(&body)
+        .send()
+        .await
+        .map_err(transport)?
+        .json()
+        .await
+        .map_err(transport)?;
+
+    if let Some(error) = reply.get("error") {
+        let message = error["message"]
+            .as_str()
+            .unwrap_or("aria2 reported an error");
+        return Err(EngineError::Rejected(message.to_owned()));
+    }
+    Ok(reply["result"].clone())
 }
 
 impl Engine for Aria2Engine {
@@ -252,6 +346,8 @@ fn parse_status(reply: &Value) -> JobStatus {
             0
         },
         connections: number("connections") as u32,
+        retryable: state == JobState::Failed
+            && NETWORK_ERROR_CODES.contains(&reply["errorCode"].as_str().unwrap_or_default()),
         error,
     }
 }

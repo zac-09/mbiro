@@ -38,6 +38,9 @@ pub struct JobStatus {
     pub speed_bps: u64,
     pub connections: u32,
     pub error: Option<String>,
+    /// A failure worth trying again without being asked, such as a lost network.
+    #[serde(skip)]
+    pub retryable: bool,
 }
 
 /// A value that must never reach a log or an error message, such as cookies.
