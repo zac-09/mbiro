@@ -4,6 +4,8 @@ import { defineConfig } from "wxt";
 // The extension only hands ordinary file links to the app. It has no host
 // permissions, no content scripts and no media handling of any kind.
 export default defineConfig({
+  // A visible folder: the browser's file picker hides dot-folders such as .output.
+  outDir: "dist",
   manifestVersion: 3,
   manifest: ({ browser }) => ({
     name: PRODUCT_NAME,

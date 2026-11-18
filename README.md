@@ -38,12 +38,12 @@ Start the app once first: on launch it tells each installed browser where the
 native messaging host is.
 
 ```sh
-pnpm build:extension   # writes apps/extension/.output/chrome-mv3 and firefox-mv3
+pnpm build:extension   # writes apps/extension/dist/chrome-mv3 and firefox-mv3
 ```
 
 - Chrome: open `chrome://extensions`, turn on Developer mode, choose "Load unpacked"
-  and pick `apps/extension/.output/chrome-mv3`.
+  and pick `apps/extension/dist/chrome-mv3`.
 - Firefox: open `about:debugging#/runtime/this-firefox`, choose "Load Temporary
-  Add-on" and pick `apps/extension/.output/firefox-mv3/manifest.json`.
+  Add-on" and pick `apps/extension/dist/firefox-mv3/manifest.json`.
 
 Then right-click any link to a file and choose "Download with Mbiro".
