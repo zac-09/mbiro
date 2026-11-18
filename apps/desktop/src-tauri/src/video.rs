@@ -367,9 +367,11 @@ pub async fn probe(tools: &ToolPaths, page: &Url) -> Result<Found, String> {
             .lines()
             .rev()
             .find_map(|line| line.strip_prefix("ERROR: "));
-        return Err(reason
-            .unwrap_or(crate::strings::VIDEO_PROBE_FAILED)
-            .to_owned());
+        let message = match reason {
+            Some(raw) => crate::engine::ytdlp::failure_message(Some(raw)),
+            None => crate::strings::VIDEO_PROBE_FAILED,
+        };
+        return Err(message.to_owned());
     }
     let json: Value = serde_json::from_slice(&output.stdout)
         .map_err(|_| crate::strings::VIDEO_PROBE_FAILED.to_owned())?;

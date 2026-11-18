@@ -170,7 +170,7 @@ impl YtDlpEngine {
                     s.completed_bytes = s.total_bytes;
                 } else {
                     s.state = JobState::Failed;
-                    s.error = reason.clone().or_else(|| Some("yt-dlp stopped".into()));
+                    s.error = Some(failure_message(reason.as_deref()).to_owned());
                 }
             });
         }))
@@ -258,6 +258,38 @@ impl Engine for YtDlpEngine {
     }
 }
 
+/// A plain sentence for a yt-dlp failure. Its own text is never shown: it names
+/// the site and suggests command-line options, neither of which belongs in the app.
+pub fn failure_message(raw: Option<&str>) -> &'static str {
+    use crate::strings::*;
+    let text = raw.unwrap_or_default().to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|word| text.contains(word));
+    if has(&["drm"]) {
+        VIDEO_FAIL_PROTECTED
+    } else if has(&[
+        "sign in",
+        "log in",
+        "login",
+        "cookies",
+        "members-only",
+        "premium",
+    ]) {
+        VIDEO_FAIL_SIGN_IN
+    } else if has(&["unsupported url"]) {
+        VIDEO_PROBE_FAILED
+    } else if has(&[
+        "unavailable",
+        "private",
+        "removed",
+        "not available",
+        "does not exist",
+    ]) {
+        VIDEO_FAIL_UNAVAILABLE
+    } else {
+        VIDEO_FAIL_OTHER
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum Event {
     Name(String),
@@ -322,5 +354,29 @@ mod tests {
             })
         );
         assert_eq!(parse_line("[download] something else"), None);
+    }
+
+    #[test]
+    fn failures_become_plain_sentences_that_name_no_site() {
+        use crate::strings::*;
+        let message = |raw| failure_message(Some(raw));
+        assert_eq!(
+            message("[somesite] abc: This video is DRM protected"),
+            VIDEO_FAIL_PROTECTED
+        );
+        assert_eq!(
+            message("[somesite] abc: Sign in to confirm your age. Use --cookies-from-browser"),
+            VIDEO_FAIL_SIGN_IN
+        );
+        assert_eq!(
+            message("Unsupported URL: https://example.com/"),
+            VIDEO_PROBE_FAILED
+        );
+        assert_eq!(
+            message("[somesite] abc: Video unavailable"),
+            VIDEO_FAIL_UNAVAILABLE
+        );
+        assert_eq!(message("[somesite] abc: something new"), VIDEO_FAIL_OTHER);
+        assert_eq!(failure_message(None), VIDEO_FAIL_OTHER);
     }
 }

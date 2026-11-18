@@ -169,6 +169,10 @@ async fn resumes_after_quit_and_relaunch_without_starting_over() {
     assert!(restored[0].completed_bytes > 0, "progress is remembered");
     let seen = run_until(&second, "completion", all_done).await;
 
+    assert!(
+        seen.iter().flatten().all(|job| !job.resume_doubtful),
+        "a normal download is not flagged"
+    );
     let job = &seen.last().unwrap()[0];
     assert_eq!(job.name, "big.bin");
     assert!(
@@ -249,7 +253,7 @@ async fn downloads_on_one_connection_when_the_server_refuses_ranges() {
         refuse_range: true,
         ..Faults::default()
     };
-    let server = TestServer::start_with(4 * MB, Duration::from_millis(2), faults).await;
+    let server = TestServer::start_with(8 * MB, Duration::from_millis(2), faults).await;
     let dir = scratch("norange");
     let engine = engine(&dir).await;
     let manager = manager(&dir, engine.clone(), 3);
@@ -262,6 +266,10 @@ async fn downloads_on_one_connection_when_the_server_refuses_ranges() {
         "the file is not intact"
     );
     assert!(seen.iter().flatten().all(|job| job.connections <= 1));
+    assert!(
+        seen.iter().flatten().any(|job| job.resume_doubtful),
+        "a download the server will not resume should be flagged"
+    );
 
     engine.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
@@ -299,9 +307,10 @@ async fn pause_frees_the_slot_and_a_missing_file_fails_then_can_be_retried() {
     let last = seen.last().unwrap();
     assert_eq!(last[0].state, JobState::Paused);
     assert_eq!(last[0].speed_bps, 0);
-    assert!(
-        last[1].error.as_deref().is_some_and(|e| !e.is_empty()),
-        "a failure needs a reason"
+    assert_eq!(
+        last[1].error.as_deref(),
+        Some("The file was not found on the server. Check the link."),
+        "a failure is explained in a plain sentence"
     );
 
     manager.retry(gone).unwrap();

@@ -37,3 +37,9 @@ rusqlite = { version = "0.43.0", features = ["bundled"] }
 [dev-dependencies]
 # Tests read the job list directly to check what is stored.
 rusqlite = { version = "0.43.0", features = ["bundled"] }
+
+# Reads the pasteboard's change count and text for the "link copied" offer.
+# The same versions Tauri already uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", features = ["NSPasteboard"] }
+objc2-foundation = { version = "0.3.2", features = ["NSString", "NSArray"] }

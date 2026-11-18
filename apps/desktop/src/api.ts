@@ -18,6 +18,8 @@ export interface Job {
   /** Seconds since 1970. */
   createdAt: number;
   finishedAt: number | null;
+  /** True while a file is coming down in a way that probably cannot be resumed. */
+  resumeDoubtful: boolean;
 }
 
 /** Mirrors `EngineHealth`, `ToolStatus` and `ToolProgress` in src-tauri/src/lib.rs. */
@@ -93,6 +95,8 @@ export interface AddDefaults {
 
 export const SNAPSHOT_EVENT = "downloads:snapshot";
 export const TOOL_PROGRESS_EVENT = "tools:progress";
+export const COPIED_LINK_EVENT = "clipboard:link";
+export const OPEN_ADD_EVENT = "add:open";
 
 /** Every command the window may send to the core. */
 export const api = {
@@ -114,6 +118,8 @@ export const api = {
   resumeAll: () => invoke<null>("resume_all"),
   showFile: (id: number) => invoke<null>("show_file", { id }),
   openMainWindow: () => invoke<null>("open_main_window"),
+  copiedLink: () => invoke<string | null>("copied_link"),
+  useCopiedLink: () => invoke<null>("use_copied_link"),
   toolsStatus: () => invoke<ToolStatus[]>("tools_status"),
   fetchTools: () => invoke<null>("fetch_tools"),
 };

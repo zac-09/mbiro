@@ -25,6 +25,9 @@ use crate::engine::{
 /// before it is left as failed for the user to retry.
 const MAX_AUTO_RETRIES: u32 = 20;
 
+/// How much of a file must arrive on a single connection before we say it may not resume.
+const SINGLE_CONNECTION_BYTES: u64 = 3 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -86,6 +89,8 @@ pub struct JobView {
     /// Seconds since 1970.
     pub created_at: i64,
     pub finished_at: Option<i64>,
+    /// True while a file is coming down in a way that probably cannot be resumed.
+    pub resume_doubtful: bool,
 }
 
 impl JobView {
@@ -127,6 +132,8 @@ struct Live {
     engine_id: String,
     speed_bps: u64,
     connections: u32,
+    /// Whether more than one connection has ever been open for this job.
+    multi_seen: bool,
 }
 
 pub struct Config {
@@ -182,6 +189,7 @@ fn read_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
             error: row.get(10)?,
             created_at: row.get(14)?,
             finished_at: row.get(15)?,
+            resume_doubtful: false,
         },
         url: row.get(2)?,
         filename: row.get(5)?,
@@ -334,6 +342,13 @@ impl Manager {
                 if let (JobState::Active, Some(live)) = (view.state, live.get(&view.id)) {
                     view.speed_bps = live.speed_bps;
                     view.connections = live.connections;
+                    // Several megabytes in and still one connection, though more
+                    // were asked for: the server is most likely ignoring `Range`,
+                    // and then a paused download starts again from nothing.
+                    view.resume_doubtful = view.kind == Kind::File
+                        && job.wanted_connections > 1
+                        && !live.multi_seen
+                        && view.completed_bytes >= SINGLE_CONNECTION_BYTES;
                 }
                 view
             })
@@ -554,6 +569,7 @@ impl Manager {
                 engine_id,
                 speed_bps: 0,
                 connections: 0,
+                multi_seen: false,
             },
         );
         Ok(())
@@ -632,6 +648,7 @@ impl Manager {
         if let Some(live) = self.live.lock().expect("live lock").get_mut(&id) {
             live.speed_bps = status.speed_bps;
             live.connections = status.connections;
+            live.multi_seen |= status.connections > 1;
         }
 
         match status.state {

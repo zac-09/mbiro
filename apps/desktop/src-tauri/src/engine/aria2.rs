@@ -330,9 +330,7 @@ fn parse_status(reply: &Value) -> JobStatus {
         _ => JobState::Failed,
     };
     let error = (state == JobState::Failed)
-        .then(|| reply["errorMessage"].as_str().map(str::to_owned))
-        .flatten()
-        .filter(|message| !message.is_empty());
+        .then(|| failure_message(reply["errorCode"].as_str().unwrap_or_default()).to_owned());
 
     JobStatus {
         id: reply["gid"].as_str().unwrap_or_default().to_owned(),
@@ -349,6 +347,25 @@ fn parse_status(reply: &Value) -> JobStatus {
         retryable: state == JobState::Failed
             && NETWORK_ERROR_CODES.contains(&reply["errorCode"].as_str().unwrap_or_default()),
         error,
+    }
+}
+
+/// A plain sentence for one of aria2's exit codes (see "EXIT STATUS" in its manual).
+/// aria2's own wording is technical and is not shown.
+fn failure_message(code: &str) -> &'static str {
+    use crate::strings::*;
+    match code {
+        "3" | "4" => FAIL_NOT_FOUND,
+        "2" | "6" => FAIL_NETWORK,
+        "19" => FAIL_NO_SERVER,
+        "9" => FAIL_DISK_FULL,
+        "13" => FAIL_FILE_EXISTS,
+        "15" | "16" | "17" | "18" => FAIL_CANNOT_SAVE,
+        "24" => FAIL_SIGN_IN,
+        "22" => FAIL_REFUSED,
+        "23" => FAIL_REDIRECTS,
+        "8" => FAIL_NO_RESUME,
+        _ => FAIL_OTHER,
     }
 }
 
@@ -454,6 +471,7 @@ mod tests {
             "gid": "1",
             "status": "error",
             "downloadSpeed": "99",
+            "errorCode": "3",
             "errorMessage": "Resource not found",
             "files": [{ "path": "", "uris": [{ "uri": "http://127.0.0.1:1/a/b.bin?x=1" }] }],
         });
@@ -461,7 +479,11 @@ mod tests {
         assert_eq!(status.state, JobState::Failed);
         assert_eq!(status.name, "b.bin");
         assert_eq!(status.speed_bps, 0);
-        assert_eq!(status.error.as_deref(), Some("Resource not found"));
+        assert_eq!(
+            status.error.as_deref(),
+            Some("The file was not found on the server. Check the link.")
+        );
+        assert!(!status.retryable);
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //! commands and renders the events sent from here.
 
 mod browsers;
+mod clipboard;
 mod constants;
 pub mod engine;
 mod ipc;
@@ -13,7 +14,7 @@ pub mod video;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -43,6 +44,10 @@ struct AppState {
     health: EngineHealth,
     tools_dir: PathBuf,
     fetching_tools: AtomicBool,
+    /// The pasteboard's change count when it was last looked at.
+    clipboard_seen: Mutex<isize>,
+    /// A copied link waiting to be offered. In memory only.
+    copied_link: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -475,6 +480,43 @@ async fn fetch_tools(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     outcome
 }
 
+/// Looks at the pasteboard only if something new was copied since last time.
+fn watch_clipboard(app: &AppHandle, state: &AppState) {
+    let count = clipboard::change_count();
+    {
+        let mut seen = state.clipboard_seen.lock().expect("clipboard lock");
+        if *seen == count {
+            return;
+        }
+        *seen = count;
+    }
+    let Some(link) = clipboard::copied_text()
+        .as_deref()
+        .and_then(clipboard::link_in)
+    else {
+        return;
+    };
+    *state.copied_link.lock().expect("copied link lock") = Some(link.clone());
+    let _ = app.emit(constants::COPIED_LINK_EVENT, Some(link));
+}
+
+/// The copied link on offer, for a popover that has just opened.
+#[tauri::command]
+fn copied_link(state: State<'_, AppState>) -> Option<String> {
+    state.copied_link.lock().expect("copied link lock").clone()
+}
+
+/// The user took the offer: open the add dialog in the main window with the link.
+#[tauri::command]
+fn use_copied_link(app: AppHandle, state: State<'_, AppState>) {
+    let link = state.copied_link.lock().expect("copied link lock").take();
+    let _ = app.emit(constants::COPIED_LINK_EVENT, None::<String>);
+    if let Some(link) = link {
+        shell::show_main_window(&app);
+        let _ = app.emit_to(constants::MAIN_WINDOW, constants::OPEN_ADD_EVENT, link);
+    }
+}
+
 /// Turns the crank once a second and tells the window what the list looks like.
 /// Runs for the life of the app, with or without a window.
 async fn run_queue(app: AppHandle) {
@@ -493,6 +535,7 @@ async fn run_queue(app: AppHandle) {
                 let _ = app.emit(constants::FINISHED_EVENT, job);
             }
         }
+        watch_clipboard(&app, &state);
         if let Ok(snapshot) = state.manager.snapshot() {
             shell::set_menu_bar_speed(&app, snapshot.iter().map(|job| job.speed_bps).sum());
             let _ = app.emit(constants::SNAPSHOT_EVENT, snapshot);
@@ -547,6 +590,9 @@ pub fn run() {
                 health,
                 tools_dir,
                 fetching_tools: AtomicBool::new(false),
+                // What is already on the pasteboard at launch is not offered.
+                clipboard_seen: Mutex::new(clipboard::change_count()),
+                copied_link: Mutex::new(None),
             });
 
             shell::setup(app)?;
@@ -570,6 +616,8 @@ pub fn run() {
             resume_all,
             show_file,
             open_main_window,
+            copied_link,
+            use_copied_link,
             tools_status,
             fetch_tools,
         ])

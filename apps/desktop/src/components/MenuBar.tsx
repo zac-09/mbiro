@@ -1,9 +1,10 @@
-import { useEffect } from "react";
-import { api } from "../api";
+import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
+import { COPIED_LINK_EVENT, api } from "../api";
 import { percent, speedMb, timeLeft } from "../format";
 import { connect, run, useStore } from "../store";
 import { strings } from "../strings";
-import { secondaryButton } from "../ui";
+import { fieldLabel, primaryButton, secondaryButton } from "../ui";
 import { SegmentBar } from "./SegmentBar";
 
 /** How many running downloads fit in the popover. */
@@ -13,6 +14,13 @@ const SHOWN = 3;
 export function MenuBar() {
   const jobs = useStore((state) => state.jobs);
   useEffect(connect, []);
+
+  const [copied, setCopied] = useState<string | null>(null);
+  useEffect(() => {
+    void api.copiedLink().then(setCopied);
+    const unlisten = listen<string | null>(COPIED_LINK_EVENT, (event) => setCopied(event.payload));
+    return () => void unlisten.then((stop) => stop());
+  }, []);
 
   const active = jobs.filter((job) => job.state === "active");
   const paused = jobs.filter((job) => job.state === "paused").length;
@@ -34,6 +42,24 @@ export function MenuBar() {
           </span>
         </div>
       </header>
+
+      {copied && (
+        <div className="flex flex-col gap-[10px] rounded-[2px] border border-accent p-3">
+          <div className="flex flex-col gap-1">
+            <span className={fieldLabel}>{strings.menuBar.linkCopied}</span>
+            <span className="line-clamp-2 text-[12.5px] [overflow-wrap:anywhere]">
+              {copied.replace(/^https?:\/\//, "")}
+            </span>
+          </div>
+          <button
+            type="button"
+            className={`${primaryButton} min-h-[44px] text-[18px]`}
+            onClick={() => run(api.useCopiedLink())}
+          >
+            {strings.menuBar.downloadLink}
+          </button>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-col gap-[14px]">
         {active.slice(0, SHOWN).map((job) => {

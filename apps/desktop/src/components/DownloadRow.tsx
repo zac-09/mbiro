@@ -10,15 +10,19 @@ const rowButton =
 
 /** The left detail line: sizes, then what kind of job it is. A failure shows its reason instead. */
 function meta(job: Job): string {
-  if (job.state === "failed") return (job.error ?? strings.row.failed).toUpperCase();
+  // A failure is two sentences; the row has room for the first.
+  if (job.state === "failed") {
+    const first = (job.error ?? strings.row.failed).split(". ")[0] ?? strings.row.failed;
+    return first.replace(/\.$/, "").toUpperCase();
+  }
   const size =
     job.state === "done" || job.totalBytes <= 0
       ? formatSize(job.state === "done" ? job.totalBytes : job.completedBytes)
       : strings.row.progress(formatSize(job.completedBytes), formatSize(job.totalBytes));
   if (job.kind === "video") return `${size} · ${strings.row.video}`;
-  return job.state === "active" && job.connections > 0
-    ? `${size} · ${strings.row.connections(job.connections)}`
-    : size;
+  if (job.state !== "active" || job.connections <= 0) return size;
+  const connections = `${size} · ${strings.row.connections(job.connections)}`;
+  return job.resumeDoubtful ? `${connections} · ${strings.row.mayNotResume}` : connections;
 }
 
 /** The line under the percentage. */
@@ -82,6 +86,7 @@ export function DownloadRow(props: Props) {
       <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-[5px]">
         <div className="text-[13.5px] font-medium [overflow-wrap:anywhere]">{job.name}</div>
         <div
+          title={failed ? (job.error ?? undefined) : undefined}
           className={`text-[11.5px] tracking-[0.06em] ${failed ? "text-danger-ink" : "text-muted"}`}
         >
           {meta(job)}

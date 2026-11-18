@@ -21,3 +21,8 @@ pub const FINISHED_EVENT: &str = "downloads:finished";
 pub const MAIN_WINDOW: &str = "main";
 pub const MENUBAR_WINDOW: &str = "menubar";
 pub const TRAY_ID: &str = "menubar";
+
+/// Event carrying the link just copied, or nothing once it has been used.
+pub const COPIED_LINK_EVENT: &str = "clipboard:link";
+/// Event asking the main window to open its add dialog with a link.
+pub const OPEN_ADD_EVENT: &str = "add:open";

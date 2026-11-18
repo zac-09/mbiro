@@ -36,6 +36,7 @@ export const strings = {
     progress: (done: string, total: string) => `${done} / ${total}`,
     connections: (n: number) => `${n} CONN`,
     video: "VIDEO",
+    mayNotResume: "MAY NOT RESUME",
     stateLabel: {
       queued: "queued",
       active: "downloading",
@@ -47,6 +48,8 @@ export const strings = {
 
   menuBar: {
     openWindow: "OPEN WINDOW",
+    linkCopied: "LINK COPIED",
+    downloadLink: "DOWNLOAD THIS LINK",
     summary: (active: number, paused: number, failed: number, more: number) => {
       const parts = [
         more > 0 ? `${more} MORE` : null,

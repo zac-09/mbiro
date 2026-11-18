@@ -26,10 +26,27 @@ function tilde(path: string): string {
   return path.replace(/^\/Users\/[^/]+/, "~");
 }
 
+/**
+ * A first guess at what a link is, from its shape alone: a name with an
+ * extension that is not a web page's is a file; anything else is a page. The
+ * user can switch. An empty field starts as a file.
+ */
+function looksLikeFile(link: string): boolean {
+  if (!link.trim()) return true;
+  try {
+    const last = new URL(link).pathname.split("/").pop() ?? "";
+    const extension = /\.([a-z0-9]{1,5})$/i.exec(last)?.[1]?.toLowerCase();
+    const page = ["html", "htm", "php", "asp", "aspx", "jsp"];
+    return extension !== undefined && !page.includes(extension);
+  } catch {
+    return true;
+  }
+}
+
 export function AddDialog({ initialUrl, onClose }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [url, setUrl] = useState(initialUrl);
-  const [kind, setKind] = useState<Kind>("file");
+  const [kind, setKind] = useState<Kind>(() => (looksLikeFile(initialUrl) ? "file" : "video"));
   const [defaults, setDefaults] = useState<AddDefaults | null>(null);
   const [dir, setDir] = useState<string | null>(null);
   const [connections, setConnections] = useState(8);

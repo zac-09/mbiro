@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { api, type Job } from "./api";
+import { listen } from "@tauri-apps/api/event";
+import { OPEN_ADD_EVENT, api, type Job } from "./api";
 import { AddDialog } from "./components/AddDialog";
 import { DownloadRow, primaryAction } from "./components/DownloadRow";
 import { speedMb } from "./format";
@@ -27,6 +28,12 @@ export function App() {
   const [adding, setAdding] = useState<string | null>(null);
 
   useEffect(connect, []);
+
+  // The menu bar popover hands over a copied link the user chose to download.
+  useEffect(() => {
+    const unlisten = listen<string>(OPEN_ADD_EVENT, (event) => setAdding(event.payload));
+    return () => void unlisten.then((stop) => stop());
+  }, []);
 
   // Pasting a link anywhere outside a text field opens the add dialog with it.
   useEffect(() => {
