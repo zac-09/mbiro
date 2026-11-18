@@ -4,8 +4,6 @@ pub const ENGINE_NOT_RUNNING: &str = "The download engine is not running. Restar
 pub const URL_INVALID: &str = "That does not look like a link. Check it and try again.";
 pub const URL_SCHEME_UNSUPPORTED: &str = "Only http and https links can be downloaded.";
 pub const REQUEST_INVALID: &str = "The download request could not be read.";
-pub const VIDEO_PAUSE_UNAVAILABLE: &str =
-    "Video downloads cannot be paused yet. Remove it and add it again.";
 pub const TOOLS_MISSING: &str = "The video tools are not installed yet. Fetch them first.";
 pub const TOOLS_BUSY: &str = "The video tools are already being fetched.";
 pub const TOOL_FETCH_FAILED: &str =

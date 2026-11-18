@@ -5,8 +5,8 @@
 //! what a page is. Protected streams are refused by yt-dlp itself, and nothing
 //! here asks it to try.
 //!
-//! Spike 3 scope: start, follow, stop. Pause and resume, the quality picker and
-//! playlists come in M3.
+//! Pausing stops yt-dlp and resuming starts it again; it continues from the
+//! partial files it left.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -31,8 +31,11 @@ pub struct ToolPaths {
 
 struct Job {
     status: JobStatus,
-    /// Dropping the task drops the child, which kills it.
-    task: JoinHandle<()>,
+    /// What was asked for, kept so the job can be started again after a pause.
+    request: AddRequest,
+    /// The task that owns the running yt-dlp. Stopping the task kills yt-dlp;
+    /// `None` while paused or once finished.
+    task: Option<JoinHandle<()>>,
 }
 
 type Jobs = Arc<Mutex<HashMap<String, Job>>>;
@@ -106,38 +109,25 @@ impl YtDlpEngine {
     }
 }
 
-impl Engine for YtDlpEngine {
-    async fn add(&self, request: AddRequest) -> Result<String, EngineError> {
+impl YtDlpEngine {
+    /// Starts yt-dlp for a job and follows it. The job must already be in the map,
+    /// or be put there before the caller releases the lock it holds.
+    fn launch(&self, id: &str, request: &AddRequest) -> Result<JoinHandle<()>, EngineError> {
         let mut child = self
-            .command(&request)
+            .command(request)
             .spawn()
             .map_err(|e| EngineError::Start(format!("could not launch yt-dlp: {e}")))?;
         let stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
 
-        let id = format!("video-{}", self.next.fetch_add(1, Ordering::Relaxed));
-        let status = JobStatus {
-            id: id.clone(),
-            state: JobState::Active,
-            name: request.url.host_str().unwrap_or_default().to_owned(),
-            total_bytes: 0,
-            completed_bytes: 0,
-            speed_bps: 0,
-            connections: 1,
-            error: None,
-            retryable: false,
-        };
-
-        let (jobs, job_id) = (self.jobs.clone(), id.clone());
-        let update = move |change: &dyn Fn(&mut JobStatus)| {
+        let (jobs, job_id) = (self.jobs.clone(), id.to_owned());
+        let update = move |change: &dyn Fn(&mut Job)| {
             if let Some(job) = jobs.lock().expect("jobs lock").get_mut(&job_id) {
-                change(&mut job.status);
+                change(job);
             }
         };
 
-        // Hold the map while the task starts, so its first update finds the job.
-        let mut map = self.jobs.lock().expect("jobs lock");
-        let task = tokio::spawn(async move {
+        Ok(tokio::spawn(async move {
             let errors = tokio::spawn(async move {
                 let mut last = None;
                 let mut lines = BufReader::new(stderr).lines();
@@ -152,15 +142,15 @@ impl Engine for YtDlpEngine {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 match parse_line(&line) {
-                    Some(Event::Name(name)) => update(&|s| s.name = name.clone()),
-                    Some(Event::Progress { done, total, speed }) => update(&|s| {
-                        s.completed_bytes = done;
-                        s.total_bytes = total.max(done);
-                        s.speed_bps = speed;
+                    Some(Event::Name(name)) => update(&|job| job.status.name = name.clone()),
+                    Some(Event::Progress { done, total, speed }) => update(&|job| {
+                        job.status.completed_bytes = done;
+                        job.status.total_bytes = total.max(done);
+                        job.status.speed_bps = speed;
                     }),
-                    Some(Event::Done(path)) => update(&|s| {
+                    Some(Event::Done(path)) => update(&|job| {
                         if let Some(name) = path.file_name() {
-                            s.name = name.to_string_lossy().into_owned();
+                            job.status.name = name.to_string_lossy().into_owned();
                         }
                     }),
                     None => {}
@@ -169,7 +159,9 @@ impl Engine for YtDlpEngine {
 
             let succeeded = child.wait().await.map(|s| s.success()).unwrap_or(false);
             let reason = errors.await.ok().flatten();
-            update(&|s| {
+            update(&|job| {
+                job.task = None;
+                let s = &mut job.status;
                 s.speed_bps = 0;
                 s.connections = 0;
                 if succeeded {
@@ -181,27 +173,75 @@ impl Engine for YtDlpEngine {
                     s.error = reason.clone().or_else(|| Some("yt-dlp stopped".into()));
                 }
             });
-        });
-        map.insert(id.clone(), Job { status, task });
+        }))
+    }
+}
+
+impl Engine for YtDlpEngine {
+    async fn add(&self, request: AddRequest) -> Result<String, EngineError> {
+        let id = format!("video-{}", self.next.fetch_add(1, Ordering::Relaxed));
+        let status = JobStatus {
+            id: id.clone(),
+            state: JobState::Active,
+            name: request.url.host_str().unwrap_or_default().to_owned(),
+            total_bytes: 0,
+            completed_bytes: 0,
+            speed_bps: 0,
+            connections: 1,
+            error: None,
+            retryable: false,
+        };
+        // Hold the map while yt-dlp starts, so its first report finds the job.
+        let mut map = self.jobs.lock().expect("jobs lock");
+        let task = Some(self.launch(&id, &request)?);
+        map.insert(
+            id.clone(),
+            Job {
+                status,
+                request,
+                task,
+            },
+        );
         Ok(id)
     }
 
-    async fn pause(&self, _id: &str) -> Result<(), EngineError> {
-        Err(EngineError::Rejected(
-            crate::strings::VIDEO_PAUSE_UNAVAILABLE.into(),
-        ))
+    /// yt-dlp cannot be told to wait, so pausing stops it. It leaves its
+    /// partial files behind and picks them up when it is started again.
+    async fn pause(&self, id: &str) -> Result<(), EngineError> {
+        let mut map = self.jobs.lock().expect("jobs lock");
+        let job = map
+            .get_mut(id)
+            .ok_or_else(|| EngineError::Rejected("no such download".into()))?;
+        if job.status.state == JobState::Active {
+            if let Some(task) = job.task.take() {
+                task.abort();
+            }
+            job.status.state = JobState::Paused;
+            job.status.speed_bps = 0;
+            job.status.connections = 0;
+        }
+        Ok(())
     }
 
-    async fn resume(&self, _id: &str) -> Result<(), EngineError> {
-        Err(EngineError::Rejected(
-            crate::strings::VIDEO_PAUSE_UNAVAILABLE.into(),
-        ))
+    async fn resume(&self, id: &str) -> Result<(), EngineError> {
+        let mut map = self.jobs.lock().expect("jobs lock");
+        let job = map
+            .get_mut(id)
+            .ok_or_else(|| EngineError::Rejected("no such download".into()))?;
+        if job.status.state == JobState::Paused {
+            job.task = Some(self.launch(id, &job.request)?);
+            job.status.state = JobState::Active;
+            job.status.connections = 1;
+        }
+        Ok(())
     }
 
     async fn remove(&self, id: &str) -> Result<(), EngineError> {
         match self.jobs.lock().expect("jobs lock").remove(id) {
             Some(job) => {
-                job.task.abort();
+                if let Some(task) = job.task {
+                    task.abort();
+                }
                 Ok(())
             }
             None => Err(EngineError::Rejected("no such download".into())),
