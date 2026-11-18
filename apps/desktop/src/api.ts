@@ -70,6 +70,21 @@ export interface VideoInfo {
   formats: FormatRow[];
 }
 
+export interface PlaylistEntry {
+  url: string;
+  title: string;
+  durationSecs: number | null;
+}
+
+export interface PlaylistInfo {
+  title: string;
+  host: string;
+  entries: PlaylistEntry[];
+}
+
+/** What a link turned out to be. Mirrors `Found` in src-tauri/src/video.rs. */
+export type Found = ({ kind: "video" } & VideoInfo) | ({ kind: "playlist" } & PlaylistInfo);
+
 export interface AddDefaults {
   dir: string;
   connections: number;
@@ -86,7 +101,9 @@ export const api = {
   addDefaults: () => invoke<AddDefaults>("add_defaults"),
   add: (url: string, dir: string | null, connections: number) =>
     invoke<number>("add_download", { url, dir, connections }),
-  probeVideo: (url: string) => invoke<VideoInfo>("probe_video", { url }),
+  probeVideo: (url: string) => invoke<Found>("probe_video", { url }),
+  addPlaylist: (items: { url: string; title: string }[], dir: string | null, quality: Quality) =>
+    invoke<number>("add_playlist", { items, dir, quality }),
   addVideo: (url: string, dir: string | null, quality: Quality | null, title: string | null) =>
     invoke<number>("add_video", { url, dir, quality, title }),
   pause: (id: number) => invoke<null>("pause_download", { id }),

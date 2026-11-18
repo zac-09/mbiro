@@ -115,6 +115,70 @@ pub struct VideoInfo {
     pub formats: Vec<FormatRow>,
 }
 
+/// One video of a playlist.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistEntry {
+    pub url: String,
+    pub title: String,
+    pub duration_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistInfo {
+    pub title: String,
+    pub host: String,
+    pub entries: Vec<PlaylistEntry>,
+}
+
+/// What a link turned out to be.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Found {
+    Video(VideoInfo),
+    Playlist(PlaylistInfo),
+}
+
+/// More entries than this are not listed; nobody ticks through thousands.
+const PLAYLIST_MAX_ENTRIES: usize = 2000;
+
+/// Turns yt-dlp's flat description of a playlist into the checklist the dialog shows.
+pub fn describe_playlist(json: &Value, page: &Url) -> PlaylistInfo {
+    let entries = json["entries"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|entry| {
+                    let address = entry["url"]
+                        .as_str()
+                        .or_else(|| entry["webpage_url"].as_str())?;
+                    // Each entry becomes its own download, so it must be an ordinary link.
+                    let url = Url::parse(address)
+                        .ok()
+                        .filter(|u| matches!(u.scheme(), "http" | "https"))?;
+                    let title = entry["title"].as_str().filter(|t| !t.is_empty());
+                    Some(PlaylistEntry {
+                        title: title.unwrap_or(address).to_owned(),
+                        url: url.into(),
+                        duration_secs: entry["duration"].as_f64().map(|d| d.round() as u64),
+                    })
+                })
+                .take(PLAYLIST_MAX_ENTRIES)
+                .collect()
+        })
+        .unwrap_or_default();
+    PlaylistInfo {
+        title: json["title"].as_str().unwrap_or_default().to_owned(),
+        host: page
+            .host_str()
+            .unwrap_or_default()
+            .trim_start_matches("www.")
+            .to_owned(),
+        entries,
+    }
+}
+
 /// A format as yt-dlp describes it, reduced to what we use.
 struct Format {
     id: String,
@@ -278,14 +342,12 @@ pub fn describe(json: &Value, page: &Url) -> VideoInfo {
 }
 
 /// Asks yt-dlp about a page. The error is yt-dlp's own last line, for the user.
-pub async fn probe(tools: &ToolPaths, page: &Url) -> Result<VideoInfo, String> {
+pub async fn probe(tools: &ToolPaths, page: &Url) -> Result<Found, String> {
     let run = Command::new(&tools.yt_dlp)
-        .args([
-            "--ignore-config",
-            "--no-playlist",
-            "--no-warnings",
-            "--dump-single-json",
-        ])
+        // A link to one video that also names a playlist is treated as the
+        // video. A playlist is only listed, not looked into, which keeps this quick.
+        .args(["--ignore-config", "--no-playlist", "--flat-playlist"])
+        .args(["--no-warnings", "--dump-single-json"])
         .arg("--js-runtimes")
         .arg(format!("deno:{}", tools.deno.display()))
         .arg("--ffmpeg-location")
@@ -312,11 +374,18 @@ pub async fn probe(tools: &ToolPaths, page: &Url) -> Result<VideoInfo, String> {
     let json: Value = serde_json::from_slice(&output.stdout)
         .map_err(|_| crate::strings::VIDEO_PROBE_FAILED.to_owned())?;
 
+    if json["_type"].as_str() == Some("playlist") {
+        let playlist = describe_playlist(&json, page);
+        if playlist.entries.is_empty() {
+            return Err(crate::strings::VIDEO_PROBE_FAILED.to_owned());
+        }
+        return Ok(Found::Playlist(playlist));
+    }
     let mut info = describe(&json, page);
     if let Some(address) = json["thumbnail"].as_str() {
         info.thumbnail = fetch_thumbnail(address).await;
     }
-    Ok(info)
+    Ok(Found::Video(info))
 }
 
 /// Fetches the page's picture, part of the look-up the user asked for. Any
@@ -438,6 +507,38 @@ mod tests {
             bare.presets.len(),
             1,
             "with no format list, best is still offered"
+        );
+    }
+
+    #[test]
+    fn lists_a_playlist_and_skips_what_is_not_a_link() {
+        let json = json!({
+            "_type": "playlist",
+            "title": "Queue talks",
+            "entries": [
+                { "url": "https://example.com/watch/1", "title": "Part one", "duration": 61.4 },
+                { "webpage_url": "https://example.com/watch/2", "title": "" },
+                { "url": "ytsearch:not a link", "title": "Odd" },
+                { "title": "No address" },
+            ],
+        });
+        let playlist = describe_playlist(&json, &page());
+        assert_eq!(playlist.title, "Queue talks");
+        assert_eq!(playlist.host, "example.com");
+        assert_eq!(
+            playlist.entries,
+            vec![
+                PlaylistEntry {
+                    url: "https://example.com/watch/1".into(),
+                    title: "Part one".into(),
+                    duration_secs: Some(61),
+                },
+                PlaylistEntry {
+                    url: "https://example.com/watch/2".into(),
+                    title: "https://example.com/watch/2".into(),
+                    duration_secs: None,
+                },
+            ]
         );
     }
 

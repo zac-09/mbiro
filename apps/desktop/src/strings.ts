@@ -74,6 +74,11 @@ export const strings = {
     thumbnail: "THUMBNAIL",
     videoMeta: (length: string | null, host: string) =>
       ["VIDEO", length, host.toUpperCase()].filter(Boolean).join(" · "),
+    playlistMeta: (count: number, host: string) =>
+      `PLAYLIST · ${count} ${count === 1 ? "VIDEO" : "VIDEOS"} · ${host.toUpperCase()}`,
+    videos: (ticked: number, total: number) => `VIDEOS · ${ticked} OF ${total}`,
+    all: "ALL",
+    none: "NONE",
     quality: "QUALITY",
     best: "BEST AVAILABLE",
     audioOnly: "AUDIO ONLY",

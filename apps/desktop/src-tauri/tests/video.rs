@@ -131,7 +131,10 @@ async fn fetches_the_tools_then_downloads_and_merges_a_clip() {
 
     // The look-up the add dialog does, and a download of the sound alone.
     let page = format!("http://{addr}/clip.mpd").parse().unwrap();
-    let info = video::probe(&paths, &page).await.expect("probe");
+    let found = video::probe(&paths, &page).await.expect("probe");
+    let video::Found::Video(info) = found else {
+        panic!("a single clip is not a playlist")
+    };
     assert_eq!(info.title, "clip");
     assert_eq!(info.presets[0].quality, Quality::Best);
     assert_eq!(info.presets[0].height, Some(240));

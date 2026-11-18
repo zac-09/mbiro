@@ -5,12 +5,13 @@ import {
   TOOL_PROGRESS_EVENT,
   api,
   type AddDefaults,
+  type Found,
   type Quality,
   type ToolProgress,
-  type VideoInfo,
 } from "../api";
 import { strings } from "../strings";
 import { fieldLabel, primaryButton, secondaryButton } from "../ui";
+import { PlaylistPicker } from "./PlaylistPicker";
 import { QualityPicker } from "./QualityPicker";
 
 type Kind = "file" | "video";
@@ -36,7 +37,9 @@ export function AddDialog({ initialUrl, onClose }: Props) {
   const [fetching, setFetching] = useState<ToolProgress | "starting" | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** What yt-dlp says about the link: not asked yet, being asked, or its answer. */
-  const [video, setVideo] = useState<{ link: string; info: VideoInfo } | null>(null);
+  const [video, setVideo] = useState<{ link: string; info: Found } | null>(null);
+  /** The playlist videos left unticked, by link. Everything starts ticked. */
+  const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
   const [quality, setQuality] = useState<Quality>({ kind: "best" });
   /** A link yt-dlp could make nothing of, so it is not shown as still being read. */
   const [failedLink, setFailedLink] = useState<string | null>(null);
@@ -68,7 +71,8 @@ export function AddDialog({ initialUrl, onClose }: Props) {
         .then((info) => {
           if (!current) return;
           setVideo({ link, info });
-          setQuality(info.presets[0]?.quality ?? { kind: "best" });
+          setSkipped(new Set());
+          setQuality({ kind: "best" });
         })
         .catch((reason: unknown) => {
           if (!current) return;
@@ -83,7 +87,7 @@ export function AddDialog({ initialUrl, onClose }: Props) {
   }, [url, probeable, video, failedLink]);
   // An answer only counts while the link it was for is still the one in the field.
   const link = url.trim();
-  const found: VideoInfo | "reading" | null = !probeable
+  const found: Found | "reading" | null = !probeable
     ? null
     : video?.link === link
       ? video.info
@@ -112,9 +116,17 @@ export function AddDialog({ initialUrl, onClose }: Props) {
     setError(null);
     const info = found !== null && found !== "reading" ? found : null;
     const added =
-      kind === "video"
-        ? api.addVideo(link, dir, info ? quality : null, info?.title ?? null)
-        : api.add(link, dir, connections);
+      kind !== "video"
+        ? api.add(link, dir, connections)
+        : info?.kind === "playlist"
+          ? api.addPlaylist(
+              info.entries
+                .filter((entry) => !skipped.has(entry.url))
+                .map(({ url, title }) => ({ url, title })),
+              dir,
+              quality,
+            )
+          : api.addVideo(link, dir, info ? quality : null, info?.title ?? null);
     added.then(onClose).catch((reason: unknown) => setError(String(reason)));
   };
 
@@ -135,6 +147,11 @@ export function AddDialog({ initialUrl, onClose }: Props) {
   );
 
   const needsTools = kind === "video" && !toolsReady;
+  const nothingTicked =
+    found !== null &&
+    found !== "reading" &&
+    found.kind === "playlist" &&
+    found.entries.every((entry) => skipped.has(entry.url));
   const fetchLabel =
     fetching === null
       ? strings.add.toolsFetch
@@ -207,8 +224,17 @@ export function AddDialog({ initialUrl, onClose }: Props) {
             {strings.add.reading}
           </p>
         )}
-        {found !== null && found !== "reading" && (
+        {found !== null && found !== "reading" && found.kind === "video" && (
           <QualityPicker info={found} picked={quality} onPick={setQuality} />
+        )}
+        {found !== null && found !== "reading" && found.kind === "playlist" && (
+          <PlaylistPicker
+            info={found}
+            picked={quality}
+            onPick={setQuality}
+            skipped={skipped}
+            onSkipped={setSkipped}
+          />
         )}
 
         {needsTools && (
@@ -252,7 +278,7 @@ export function AddDialog({ initialUrl, onClose }: Props) {
           <button
             type="submit"
             className={`${primaryButton} px-7`}
-            disabled={needsTools || found === "reading"}
+            disabled={needsTools || found === "reading" || nothingTicked}
           >
             {strings.add.download}
           </button>

@@ -41,6 +41,35 @@ function formatText(row: FormatRow): { name: string; detail: string } {
   };
 }
 
+interface OptionProps {
+  text: { name: string; detail: string };
+  on: boolean;
+  onPick: () => void;
+}
+
+/** One line of a quality choice: the design's "selected option". */
+export function QualityOption({ text, on, onPick }: OptionProps) {
+  return (
+    <label
+      className={`flex min-h-[52px] cursor-pointer items-center gap-3 rounded-[2px] border px-[14px] transition-colors duration-200 ${
+        on ? "border-accent bg-accent-wash" : "border-border bg-transparent"
+      }`}
+    >
+      <input
+        type="radio"
+        name="quality"
+        checked={on}
+        onChange={onPick}
+        className="m-0 h-4 w-4 accent-accent"
+      />
+      <span className="flex-auto font-display text-[21px] font-semibold tracking-[0.06em]">
+        {text.name}
+      </span>
+      <span className="text-[11.5px] tracking-[0.06em] text-muted">{text.detail}</span>
+    </label>
+  );
+}
+
 interface Props {
   info: VideoInfo;
   picked: Quality;
@@ -52,29 +81,14 @@ export function QualityPicker({ info, picked, onPick }: Props) {
   const [all, setAll] = useState(false);
   const key = (quality: Quality) => JSON.stringify(quality);
 
-  const option = (quality: Quality, text: { name: string; detail: string }) => {
-    const on = key(quality) === key(picked);
-    return (
-      <label
-        key={key(quality)}
-        className={`flex min-h-[52px] cursor-pointer items-center gap-3 rounded-[2px] border px-[14px] transition-colors duration-200 ${
-          on ? "border-accent bg-accent-wash" : "border-border bg-transparent"
-        }`}
-      >
-        <input
-          type="radio"
-          name="quality"
-          checked={on}
-          onChange={() => onPick(quality)}
-          className="m-0 h-4 w-4 accent-accent"
-        />
-        <span className="flex-auto font-display text-[21px] font-semibold tracking-[0.06em]">
-          {text.name}
-        </span>
-        <span className="text-[11.5px] tracking-[0.06em] text-muted">{text.detail}</span>
-      </label>
-    );
-  };
+  const option = (quality: Quality, text: { name: string; detail: string }) => (
+    <QualityOption
+      key={key(quality)}
+      text={text}
+      on={key(quality) === key(picked)}
+      onPick={() => onPick(quality)}
+    />
+  );
 
   return (
     <>

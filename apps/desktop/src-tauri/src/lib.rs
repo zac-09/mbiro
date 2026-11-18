@@ -221,7 +221,7 @@ fn http_url(text: &str) -> Result<Url, String> {
 /// Looks a page up with yt-dlp so the add dialog can offer its qualities.
 /// Which pages work is yt-dlp's business.
 #[tauri::command]
-async fn probe_video(state: State<'_, AppState>, url: String) -> Result<video::VideoInfo, String> {
+async fn probe_video(state: State<'_, AppState>, url: String) -> Result<video::Found, String> {
     let url = http_url(&url)?;
     let engine = state.manager.video_engine().ok_or(strings::TOOLS_MISSING)?;
     video::probe(engine.tools(), &url).await
@@ -252,6 +252,47 @@ fn add_video(
         title: title.map(|t| t.chars().filter(|c| !c.is_control()).take(200).collect()),
     };
     queue_download(&state, spec).map_err(AddError::message)
+}
+
+/// One ticked line of a playlist's checklist.
+#[derive(serde::Deserialize)]
+struct PlaylistItem {
+    url: String,
+    title: String,
+}
+
+/// Queues the ticked videos of a playlist, each as its own download, all with
+/// the same quality. Returns how many were queued.
+#[tauri::command]
+fn add_playlist(
+    state: State<'_, AppState>,
+    items: Vec<PlaylistItem>,
+    dir: Option<String>,
+    quality: video::Quality,
+) -> Result<usize, String> {
+    let video = quality.options().ok_or(strings::REQUEST_INVALID)?;
+    let mut queued = 0;
+    for item in items {
+        let spec = DownloadSpec {
+            kind: Kind::Video,
+            url: item.url,
+            dir: dir.clone(),
+            filename: None,
+            connections: Some(1),
+            context: BrowserContext::default(),
+            video: Some(video.clone()),
+            title: Some(
+                item.title
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(200)
+                    .collect(),
+            ),
+        };
+        queue_download(&state, spec).map_err(AddError::message)?;
+        queued += 1;
+    }
+    Ok(queued)
 }
 
 /// What the add dialog starts from.
@@ -520,6 +561,7 @@ pub fn run() {
             add_download,
             add_video,
             probe_video,
+            add_playlist,
             pause_download,
             resume_download,
             retry_download,
