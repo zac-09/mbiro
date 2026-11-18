@@ -79,6 +79,7 @@ enum AddError {
     InvalidContext,
     EngineDown,
     ToolsMissing,
+    BadFolder,
     Storage(String),
 }
 
@@ -91,6 +92,7 @@ impl AddError {
             Self::InvalidContext => strings::REQUEST_INVALID.to_owned(),
             Self::EngineDown => strings::ENGINE_NOT_RUNNING.to_owned(),
             Self::ToolsMissing => strings::TOOLS_MISSING.to_owned(),
+            Self::BadFolder => strings::FOLDER_MISSING.to_owned(),
             Self::Storage(reason) => reason,
         }
     }
@@ -101,7 +103,7 @@ impl AddError {
             Self::InvalidUrl | Self::UnsupportedScheme => ipc::RefusalCode::UnsupportedUrl,
             Self::InvalidContext => ipc::RefusalCode::InvalidMessage,
             Self::EngineDown | Self::ToolsMissing => ipc::RefusalCode::EngineUnavailable,
-            Self::Storage(_) => ipc::RefusalCode::Rejected,
+            Self::BadFolder | Self::Storage(_) => ipc::RefusalCode::Rejected,
         }
     }
 }
@@ -130,6 +132,8 @@ fn safe_filename(suggested: &str) -> Option<String> {
 struct DownloadSpec {
     kind: Kind,
     url: String,
+    /// A folder chosen in the add dialog. `None` is the default folder.
+    dir: Option<String>,
     filename: Option<String>,
     connections: Option<u8>,
     context: BrowserContext,
@@ -159,10 +163,15 @@ fn queue_download(state: &AppState, spec: DownloadSpec) -> Result<i64, AddError>
         Kind::Video if !state.manager.has_video_engine() => return Err(AddError::ToolsMissing),
         _ => {}
     }
+    let dir = match spec.dir.map(PathBuf::from) {
+        Some(dir) if dir.is_absolute() && dir.is_dir() => Some(dir),
+        Some(_) => return Err(AddError::BadFolder),
+        None => None,
+    };
     let job = NewJob {
         kind: spec.kind,
         url,
-        dir: None,
+        dir,
         filename: spec.filename.as_deref().and_then(safe_filename),
         connections: spec.connections,
         context: BrowserContext {
@@ -178,11 +187,13 @@ fn queue_download(state: &AppState, spec: DownloadSpec) -> Result<i64, AddError>
 fn add_download(
     state: State<'_, AppState>,
     url: String,
+    dir: Option<String>,
     connections: Option<u8>,
 ) -> Result<i64, String> {
     let spec = DownloadSpec {
         kind: Kind::File,
         url,
+        dir,
         filename: None,
         connections,
         context: BrowserContext::default(),
@@ -192,15 +203,34 @@ fn add_download(
 
 /// Hands a page address to yt-dlp. Which pages work is yt-dlp's business.
 #[tauri::command]
-fn add_video(state: State<'_, AppState>, url: String) -> Result<i64, String> {
+fn add_video(state: State<'_, AppState>, url: String, dir: Option<String>) -> Result<i64, String> {
     let spec = DownloadSpec {
         kind: Kind::Video,
         url,
+        dir,
         filename: None,
         connections: Some(1),
         context: BrowserContext::default(),
     };
     queue_download(&state, spec).map_err(AddError::message)
+}
+
+/// What the add dialog starts from.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddDefaults {
+    dir: PathBuf,
+    connections: u8,
+    max_connections: u8,
+}
+
+#[tauri::command]
+fn add_defaults(state: State<'_, AppState>) -> AddDefaults {
+    AddDefaults {
+        dir: state.manager.default_dir().to_owned(),
+        connections: engine::DEFAULT_CONNECTIONS,
+        max_connections: engine::MAX_CONNECTIONS,
+    }
 }
 
 #[tauri::command]
@@ -262,6 +292,7 @@ async fn serve_browsers(app: AppHandle, listener: tokio::net::UnixListener) {
             let spec = DownloadSpec {
                 kind: Kind::File,
                 url: request.url,
+                dir: None,
                 filename: request.filename,
                 connections: None,
                 context: BrowserContext {
@@ -386,6 +417,7 @@ fn sidecar_path(name: &str) -> std::io::Result<PathBuf> {
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let started = tauri::async_runtime::block_on(async {
@@ -425,6 +457,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             engine_health,
             list_downloads,
+            add_defaults,
             add_download,
             add_video,
             pause_download,

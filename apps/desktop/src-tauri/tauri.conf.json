@@ -14,14 +14,15 @@
       {
         "label": "main",
         "title": "Mbiro",
-        "width": 900,
-        "height": 640,
-        "minWidth": 480,
-        "minHeight": 360
+        "width": 1280,
+        "height": 840,
+        "minWidth": 520,
+        "minHeight": 480,
+        "backgroundColor": "#0C0D0E"
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {

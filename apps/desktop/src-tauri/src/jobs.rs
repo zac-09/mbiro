@@ -237,6 +237,10 @@ impl Manager {
         })
     }
 
+    pub fn default_dir(&self) -> &std::path::Path {
+        &self.default_dir
+    }
+
     pub fn file_engine(&self) -> Option<&Arc<Aria2Engine>> {
         self.files.as_ref()
     }

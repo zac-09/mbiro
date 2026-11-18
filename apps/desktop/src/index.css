@@ -1,0 +1,91 @@
+@import "tailwindcss";
+/* Fonts are bundled with the app; nothing is fetched at runtime. */
+@import "@fontsource/barlow-condensed/600.css";
+@import "@fontsource/barlow-condensed/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/* Design tokens from DESIGN.md. */
+@theme {
+  --color-bg: #0c0d0e;
+  --color-field: #141618;
+  --color-raised: #1b1e20;
+  --color-ink: #f2f4f5;
+  --color-muted: #a7adb2;
+  --color-soft: #d4d8db;
+  --color-accent: #c6f432;
+  --color-accent-dim: #5e7417;
+  --color-accent-wash: #1a1f0c;
+  --color-seg-empty: #24272a;
+  --color-seg-paused: #7b8187;
+  --color-rule-strong: #2a2d30;
+  --color-rule: #1f2224;
+  --color-border: #3c4044;
+  --color-danger: #ff5a3c;
+  --color-danger-ink: #ff9a80;
+
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+  --animate-blink: blink 0.9s steps(2, jump-none) infinite;
+  --animate-drop: drop 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.15;
+    }
+  }
+  @keyframes drop {
+    from {
+      opacity: 0;
+      transform: translateY(-14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+html {
+  color-scheme: dark;
+}
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  /* The window is an instrument, not a page: text is not selectable by drag. */
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+input {
+  -webkit-user-select: text;
+  user-select: text;
+}
+button {
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-blink,
+  .animate-drop {
+    animation: none;
+  }
+  button {
+    transition: none;
+  }
+}
