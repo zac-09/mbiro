@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { api, type Job } from "../api";
 import { clock, formatSize, percent, speedMb, timeLeft } from "../format";
 import { run } from "../store";
@@ -66,7 +65,6 @@ interface Props {
 
 export function DownloadRow(props: Props) {
   const { job, selected, confirming } = props;
-  const [hover, setHover] = useState(false);
   const pct = percent(job);
   const failed = job.state === "failed";
   const dim = job.state === "paused" || job.state === "queued" || job.state === "done";
@@ -79,9 +77,7 @@ export function DownloadRow(props: Props) {
       aria-selected={selected}
       aria-label={`${job.name}, ${strings.row.stateLabel[job.state]}, ${pct}%`}
       onMouseDown={props.onSelect}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      className={`flex min-h-[78px] flex-wrap items-center gap-x-6 gap-y-[10px] py-[10px] ${props.last ? "" : "border-b border-rule"} ${selected ? "shadow-[inset_2px_0_0_var(--color-accent)] pl-3" : ""}`}
+      className={`group flex min-h-[78px] flex-wrap items-center gap-x-6 gap-y-[10px] py-[10px] ${props.last ? "" : "border-b border-rule"} ${selected ? "shadow-[inset_2px_0_0_var(--color-accent)] pl-3" : ""}`}
     >
       <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-[5px]">
         <div className="text-[13.5px] font-medium [overflow-wrap:anywhere]">{job.name}</div>
@@ -109,44 +105,45 @@ export function DownloadRow(props: Props) {
         </span>
       </div>
 
-      {confirming ? (
-        <div className="flex gap-[10px]">
-          <button
-            type="button"
-            autoFocus
-            className={`${rowButton} border-danger-ink`}
-            onClick={() => run(api.remove(job.id))}
-          >
-            {strings.row.confirmRemove}
-          </button>
-          <button
-            type="button"
-            className={`${rowButton} border-border`}
-            onClick={props.onCancelRemove}
-          >
-            {strings.row.keep}
-          </button>
-        </div>
-      ) : (
-        <div className="flex gap-[10px]">
-          {(selected || hover) && (
+      {/* Two fixed slots, so showing REMOVE never moves or pushes anything. */}
+      <div className="flex flex-[0_0_242px] justify-end gap-[10px]">
+        {confirming ? (
+          <>
+            <button
+              type="button"
+              autoFocus
+              className={`${rowButton} border-danger-ink`}
+              onClick={() => run(api.remove(job.id))}
+            >
+              {strings.row.confirmRemove}
+            </button>
             <button
               type="button"
               className={`${rowButton} border-border`}
+              onClick={props.onCancelRemove}
+            >
+              {strings.row.keep}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className={`${rowButton} border-border ${selected ? "" : "invisible group-hover:visible"}`}
               onClick={props.onAskRemove}
             >
               {strings.row.remove}
             </button>
-          )}
-          <button
-            type="button"
-            className={`${rowButton} ${failed ? "border-danger-ink" : "border-border"}`}
-            onClick={action.act}
-          >
-            {action.label}
-          </button>
-        </div>
-      )}
+            <button
+              type="button"
+              className={`${rowButton} ${failed ? "border-danger-ink" : "border-border"}`}
+              onClick={action.act}
+            >
+              {action.label}
+            </button>
+          </>
+        )}
+      </div>
     </li>
   );
 }
