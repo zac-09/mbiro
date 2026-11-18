@@ -17,6 +17,28 @@ describe("downloadRequestSchema", () => {
   });
 });
 
+describe("downloadRequestSchema browser context", () => {
+  const base = { type: "download", version: 1, url: "https://host/a.zip" };
+
+  it("accepts the optional browser context", () => {
+    const full = {
+      ...base,
+      filename: "a.zip",
+      referrer: "https://host/page",
+      userAgent: "UA/1",
+      cookies: "session=abc; theme=dark",
+    };
+    expect(downloadRequestSchema.parse(full)).toEqual(full);
+  });
+
+  it("refuses a header value that carries a line break", () => {
+    expect(downloadRequestSchema.safeParse({ ...base, cookies: "a=b\r\nX: 1" }).success).toBe(
+      false,
+    );
+    expect(downloadRequestSchema.safeParse({ ...base, referrer: "" }).success).toBe(false);
+  });
+});
+
 describe("ackSchema", () => {
   // These are the exact bytes the app and the host send.
   it("reads what the Rust side writes", () => {

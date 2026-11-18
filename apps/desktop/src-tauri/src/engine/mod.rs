@@ -39,11 +39,46 @@ pub struct JobStatus {
     pub error: Option<String>,
 }
 
+/// A value that must never reach a log or an error message, such as cookies.
+/// Its `Debug` output is a placeholder; read it with [`Secret::expose`].
+#[derive(Clone, PartialEq, serde::Deserialize)]
+#[serde(transparent)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// What the browser would have sent with the download, so the server sees the
+/// same client. Held in memory only and gone when the job is.
+#[derive(Debug, Clone, Default)]
+pub struct BrowserContext {
+    pub referrer: Option<String>,
+    pub user_agent: Option<String>,
+    /// The value of the `Cookie` header.
+    pub cookies: Option<Secret>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AddRequest {
     pub url: Url,
     pub dir: PathBuf,
     pub connections: u8,
+    /// A plain file name to save as. `None` lets the engine pick one.
+    pub filename: Option<String>,
+    pub context: BrowserContext,
 }
 
 #[derive(Debug)]

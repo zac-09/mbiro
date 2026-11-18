@@ -6,7 +6,7 @@
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -19,6 +19,7 @@ pub struct TestServer {
     pub body: Arc<Vec<u8>>,
     open: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
+    heads: Arc<Mutex<Vec<String>>>,
 }
 
 impl TestServer {
@@ -31,15 +32,18 @@ impl TestServer {
         let body = Arc::new(pattern(size));
         let open = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
+        let heads = Arc::new(Mutex::new(Vec::new()));
+        let heads_c = heads.clone();
 
         let (shared, open_c, peak_c) = (body.clone(), open.clone(), peak.clone());
         tokio::spawn(async move {
             while let Ok((stream, _)) = listener.accept().await {
                 let (body, open, peak) = (shared.clone(), open_c.clone(), peak_c.clone());
+                let heads = heads_c.clone();
                 tokio::spawn(async move {
                     let now = open.fetch_add(1, Ordering::SeqCst) + 1;
                     peak.fetch_max(now, Ordering::SeqCst);
-                    let _ = serve(stream, &body, chunk_delay).await;
+                    let _ = serve(stream, &body, chunk_delay, &heads).await;
                     open.fetch_sub(1, Ordering::SeqCst);
                 });
             }
@@ -50,6 +54,7 @@ impl TestServer {
             body,
             open,
             peak,
+            heads,
         }
     }
 
@@ -60,6 +65,12 @@ impl TestServer {
     /// The most connections that were ever open at once.
     pub fn peak_connections(&self) -> usize {
         self.peak.load(Ordering::SeqCst)
+    }
+
+    /// The request line and headers of every request received so far.
+    #[allow(dead_code)]
+    pub fn request_heads(&self) -> Vec<String> {
+        self.heads.lock().unwrap().clone()
     }
 
     #[allow(dead_code)]
@@ -79,7 +90,12 @@ fn pattern(size: usize) -> Vec<u8> {
         .collect()
 }
 
-async fn serve(mut stream: TcpStream, body: &[u8], delay: Duration) -> std::io::Result<()> {
+async fn serve(
+    mut stream: TcpStream,
+    body: &[u8],
+    delay: Duration,
+    heads: &Mutex<Vec<String>>,
+) -> std::io::Result<()> {
     let mut head = Vec::new();
     let mut buf = [0u8; 1024];
     while !head.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -90,6 +106,7 @@ async fn serve(mut stream: TcpStream, body: &[u8], delay: Duration) -> std::io::
         head.extend_from_slice(&buf[..n]);
     }
     let head = String::from_utf8_lossy(&head);
+    heads.lock().unwrap().push(head.to_string());
     let is_head = head.starts_with("HEAD ");
     let range = head
         .lines()

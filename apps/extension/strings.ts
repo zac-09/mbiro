@@ -5,6 +5,9 @@ export const strings = {
   menuDownload: `Download with ${PRODUCT_NAME}`,
   badgeOk: "OK",
   badgeFailed: "!",
+  badgeOff: "OFF",
+  catchingOn: `${PRODUCT_NAME} is catching downloads. Click to switch off.`,
+  catchingOff: `${PRODUCT_NAME} is not catching downloads. Click to switch on.`,
   sent: `Sent to ${PRODUCT_NAME}.`,
   noAnswer: `${PRODUCT_NAME} did not answer. Open the app and try again.`,
   refused: {

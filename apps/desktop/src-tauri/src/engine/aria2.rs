@@ -164,11 +164,24 @@ impl Aria2Engine {
 impl Engine for Aria2Engine {
     async fn add(&self, request: AddRequest) -> Result<String, EngineError> {
         let connections = request.connections.clamp(1, MAX_CONNECTIONS).to_string();
-        let options = json!({
+        let mut options = json!({
             "dir": request.dir,
             "split": connections,
             "max-connection-per-server": connections,
         });
+        if let Some(name) = &request.filename {
+            options["out"] = json!(name);
+        }
+        if let Some(referrer) = &request.context.referrer {
+            options["referer"] = json!(referrer);
+        }
+        if let Some(agent) = &request.context.user_agent {
+            options["user-agent"] = json!(agent);
+        }
+        if let Some(cookies) = &request.context.cookies {
+            // Kept in aria2's memory for this download only; no session file is written.
+            options["header"] = json!([format!("Cookie: {}", cookies.expose())]);
+        }
         let gid = self
             .call("aria2.addUri", vec![json!([request.url.as_str()]), options])
             .await?;

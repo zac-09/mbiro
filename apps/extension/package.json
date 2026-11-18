@@ -8,6 +8,7 @@
     "build:chrome": "wxt build -b chrome",
     "build:firefox": "wxt build -b firefox --mv3",
     "typecheck": "wxt prepare && tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "typescript": "6.0.3",
+    "vitest": "5.1.1",
     "wxt": "0.21.5"
   }
 }

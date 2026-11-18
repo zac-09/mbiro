@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use mbiro_desktop::engine::aria2::Aria2Engine;
-use mbiro_desktop::engine::{AddRequest, Engine, JobState, JobStatus};
+use mbiro_desktop::engine::{AddRequest, BrowserContext, Engine, JobState, JobStatus, Secret};
 use support::TestServer;
 
 const MB: usize = 1024 * 1024;
@@ -68,6 +68,8 @@ async fn downloads_a_file_in_segments_and_reports_progress() {
         url: server.url("sample.bin").parse().unwrap(),
         dir: dir.clone(),
         connections: 8,
+        filename: None,
+        context: BrowserContext::default(),
     };
     let id = engine.add(request).await.expect("add");
     let seen = wait_for(&engine, &id, "completion", |s| s.state == JobState::Done).await;
@@ -121,6 +123,8 @@ async fn pauses_resumes_and_finishes_intact() {
         url: server.url("paused.bin").parse().unwrap(),
         dir: dir.clone(),
         connections: 4,
+        filename: None,
+        context: BrowserContext::default(),
     };
     let id = engine.add(request).await.expect("add");
     wait_for(&engine, &id, "first bytes", |s| s.completed_bytes > 0).await;
@@ -174,6 +178,52 @@ async fn secret_file_is_removed_once_the_engine_is_up() {
         leftovers.is_empty(),
         "the config file with the secret was left on disk"
     );
+
+    engine.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sends_the_browser_context_and_saves_under_the_given_name() {
+    let server = TestServer::start(2 * MB, Duration::from_millis(1)).await;
+    let dir = scratch("context");
+    let engine = Aria2Engine::start(&aria2_binary(), &dir.join("run"))
+        .await
+        .expect("start aria2");
+
+    let request = AddRequest {
+        url: server.url("download?id=42").parse().unwrap(),
+        dir: dir.clone(),
+        connections: 2,
+        filename: Some("invoice.pdf".into()),
+        context: BrowserContext {
+            referrer: Some("http://127.0.0.1/account".into()),
+            user_agent: Some("TestBrowser/1.0".into()),
+            cookies: Some(Secret::new("session=abc123; theme=dark")),
+        },
+    };
+    let id = engine.add(request).await.expect("add");
+    let seen = wait_for(&engine, &id, "completion", |s| s.state == JobState::Done).await;
+    assert_eq!(seen.last().unwrap().name, "invoice.pdf");
+    assert!(dir.join("invoice.pdf").exists());
+
+    let heads = server.request_heads();
+    assert!(!heads.is_empty());
+    for head in &heads {
+        let head = head.to_ascii_lowercase();
+        assert!(
+            head.contains("cookie: session=abc123; theme=dark\r\n"),
+            "no cookies in: {head}"
+        );
+        assert!(
+            head.contains("referer: http://127.0.0.1/account\r\n"),
+            "no referrer in: {head}"
+        );
+        assert!(
+            head.contains("user-agent: testbrowser/1.0\r\n"),
+            "no user agent in: {head}"
+        );
+    }
 
     engine.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);

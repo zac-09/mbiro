@@ -16,7 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use url::Url;
 
 use engine::aria2::Aria2Engine;
-use engine::{AddRequest, Engine, JobStatus, DEFAULT_CONNECTIONS};
+use engine::{AddRequest, BrowserContext, Engine, JobStatus, Secret, DEFAULT_CONNECTIONS};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -59,6 +59,7 @@ fn list_downloads(state: State<'_, AppState>) -> Vec<JobStatus> {
 enum AddError {
     InvalidUrl,
     UnsupportedScheme,
+    InvalidContext,
     NoDownloadFolder,
     EngineDown,
     Engine(String),
@@ -70,6 +71,7 @@ impl AddError {
         match self {
             Self::InvalidUrl => strings::URL_INVALID.to_owned(),
             Self::UnsupportedScheme => strings::URL_SCHEME_UNSUPPORTED.to_owned(),
+            Self::InvalidContext => strings::REQUEST_INVALID.to_owned(),
             Self::NoDownloadFolder => strings::DOWNLOAD_FOLDER_MISSING.to_owned(),
             Self::EngineDown => strings::ENGINE_NOT_RUNNING.to_owned(),
             Self::Engine(reason) => reason,
@@ -80,17 +82,59 @@ impl AddError {
     fn code(&self) -> ipc::RefusalCode {
         match self {
             Self::InvalidUrl | Self::UnsupportedScheme => ipc::RefusalCode::UnsupportedUrl,
+            Self::InvalidContext => ipc::RefusalCode::InvalidMessage,
             Self::NoDownloadFolder | Self::EngineDown => ipc::RefusalCode::EngineUnavailable,
             Self::Engine(_) => ipc::RefusalCode::Rejected,
         }
     }
 }
 
+/// Longest header value accepted from a browser. Real cookie headers stay well below this.
+const MAX_HEADER_VALUE: usize = 32 * 1024;
+
+/// A value that can go into an HTTP header as it is: no control characters
+/// (so no way to smuggle in a second header) and a sane length.
+fn header_safe(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_HEADER_VALUE && !value.chars().any(char::is_control)
+}
+
+/// Reduces a name suggested by a browser to a plain file name, or nothing.
+/// Folders, hidden files and odd characters are never taken from outside.
+fn safe_filename(suggested: &str) -> Option<String> {
+    let name = suggested.rsplit(['/', '\\']).next()?.trim();
+    let plain = !name.is_empty()
+        && name.len() <= 255
+        && !name.starts_with('.')
+        && !name.chars().any(char::is_control);
+    plain.then(|| name.to_owned())
+}
+
+/// What is known about a download before it is checked.
+#[derive(Default)]
+struct DownloadSpec {
+    url: String,
+    filename: Option<String>,
+    context: BrowserContext,
+}
+
 /// The one way a download starts, whether asked for by the window or a browser.
-async fn start_download(state: &AppState, url: &str) -> Result<String, AddError> {
-    let url = Url::parse(url.trim()).map_err(|_| AddError::InvalidUrl)?;
+async fn start_download(state: &AppState, spec: DownloadSpec) -> Result<String, AddError> {
+    let url = Url::parse(spec.url.trim()).map_err(|_| AddError::InvalidUrl)?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(AddError::UnsupportedScheme);
+    }
+    let BrowserContext {
+        referrer,
+        user_agent,
+        cookies,
+    } = spec.context;
+    let headers = [
+        referrer.as_deref(),
+        user_agent.as_deref(),
+        cookies.as_ref().map(Secret::expose),
+    ];
+    if !headers.into_iter().flatten().all(header_safe) {
+        return Err(AddError::InvalidContext);
     }
     let dir = state
         .download_dir
@@ -101,6 +145,12 @@ async fn start_download(state: &AppState, url: &str) -> Result<String, AddError>
         url,
         dir,
         connections: DEFAULT_CONNECTIONS,
+        filename: spec.filename.as_deref().and_then(safe_filename),
+        context: BrowserContext {
+            referrer,
+            user_agent,
+            cookies,
+        },
     };
     let id = engine
         .add(request)
@@ -112,7 +162,11 @@ async fn start_download(state: &AppState, url: &str) -> Result<String, AddError>
 
 #[tauri::command]
 async fn add_download(state: State<'_, AppState>, url: String) -> Result<String, String> {
-    start_download(&state, &url)
+    let spec = DownloadSpec {
+        url,
+        ..Default::default()
+    };
+    start_download(&state, spec)
         .await
         .map_err(AddError::message)
 }
@@ -122,8 +176,17 @@ async fn serve_browsers(app: AppHandle, listener: tokio::net::UnixListener) {
     ipc::serve(listener, move |request| {
         let app = app.clone();
         async move {
-            let ipc::Request::Download { url, .. } = request;
-            match start_download(&app.state::<AppState>(), &url).await {
+            let ipc::Request::Download(request) = request;
+            let spec = DownloadSpec {
+                url: request.url,
+                filename: request.filename,
+                context: BrowserContext {
+                    referrer: request.referrer,
+                    user_agent: request.user_agent,
+                    cookies: request.cookies,
+                },
+            };
+            match start_download(&app.state::<AppState>(), spec).await {
                 Ok(id) => ipc::Ack::accepted(id),
                 Err(error) => ipc::Ack::refused(error.code()),
             }
@@ -256,4 +319,36 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_values_cannot_carry_a_second_header() {
+        assert!(header_safe("session=abc; theme=dark"));
+        assert!(!header_safe("a=b\r\nX-Injected: 1"));
+        assert!(!header_safe("a=b\nc"));
+        assert!(!header_safe(""));
+        assert!(!header_safe(&"x".repeat(MAX_HEADER_VALUE + 1)));
+    }
+
+    #[test]
+    fn suggested_names_are_reduced_to_a_plain_file_name() {
+        assert_eq!(safe_filename("report.pdf").as_deref(), Some("report.pdf"));
+        assert_eq!(
+            safe_filename("/Users/me/Downloads/report.pdf").as_deref(),
+            Some("report.pdf")
+        );
+        assert_eq!(
+            safe_filename("../../.ssh/authorized_keys").as_deref(),
+            Some("authorized_keys")
+        );
+        assert_eq!(safe_filename("C:\\tmp\\a.zip").as_deref(), Some("a.zip"));
+        assert_eq!(safe_filename(".zshrc"), None);
+        assert_eq!(safe_filename("dir/"), None);
+        assert_eq!(safe_filename(".."), None);
+        assert_eq!(safe_filename("a\u{0}b"), None);
+    }
 }

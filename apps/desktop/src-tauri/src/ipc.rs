@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use mbiro_common::frame::MAX_FRAME;
 use serde::{Deserialize, Serialize};
+
+use crate::engine::Secret;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
@@ -22,7 +24,23 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
-    Download { version: u32, url: String },
+    Download(DownloadRequest),
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadRequest {
+    pub version: u32,
+    pub url: String,
+    #[serde(default)]
+    pub filename: Option<String>,
+    #[serde(default)]
+    pub referrer: Option<String>,
+    #[serde(default)]
+    pub user_agent: Option<String>,
+    /// The `Cookie` header value. Never logged: `Secret` hides it from `Debug`.
+    #[serde(default)]
+    pub cookies: Option<Secret>,
 }
 
 /// Why a request was turned down. The extension owns the wording.
@@ -108,7 +126,7 @@ where
     stream.read_exact(&mut payload).await?;
 
     let ack = match serde_json::from_slice::<Request>(&payload) {
-        Ok(Request::Download { version, .. }) if version != PROTOCOL_VERSION => {
+        Ok(Request::Download(request)) if request.version != PROTOCOL_VERSION => {
             Ack::refused(RefusalCode::UnsupportedVersion)
         }
         Ok(request) => handle(request).await,
@@ -152,11 +170,11 @@ mod tests {
         let path = socket(name);
         let listener = bind(&path).unwrap();
         tokio::spawn(serve(listener, |request| async move {
-            match request {
-                Request::Download { url, .. } if url.starts_with("http") => {
-                    Ack::accepted("gid-1".into())
-                }
-                Request::Download { .. } => Ack::refused(RefusalCode::UnsupportedUrl),
+            let Request::Download(request) = request;
+            if request.url.starts_with("http") {
+                Ack::accepted("gid-1".into())
+            } else {
+                Ack::refused(RefusalCode::UnsupportedUrl)
             }
         }));
         path
@@ -199,6 +217,22 @@ mod tests {
             );
         }
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn reads_the_browser_context_and_keeps_cookies_out_of_debug_output() {
+        let message = br#"{"type":"download","version":1,"url":"https://host/a.zip",
+            "filename":"a.zip","referrer":"https://host/page","userAgent":"UA/1",
+            "cookies":"session=hunter2"}"#;
+        let Request::Download(request) = serde_json::from_slice(message).unwrap();
+        assert_eq!(request.filename.as_deref(), Some("a.zip"));
+        assert_eq!(request.referrer.as_deref(), Some("https://host/page"));
+        assert_eq!(request.user_agent.as_deref(), Some("UA/1"));
+        assert_eq!(
+            request.cookies.as_ref().unwrap().expose(),
+            "session=hunter2"
+        );
+        assert!(!format!("{request:?}").contains("hunter2"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

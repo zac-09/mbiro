@@ -7,11 +7,28 @@ import { z } from "zod";
  */
 export const PROTOCOL_VERSION = 1;
 
-/** Extension to app: download this ordinary file link. */
+/** A header value: one line, no control characters, bounded. */
+const headerValue = z
+  .string()
+  .min(1)
+  .max(32 * 1024)
+  // eslint-disable-next-line no-control-regex
+  .regex(/^[^\u0000-\u001f\u007f]*$/);
+
+/**
+ * Extension to app: download this ordinary file link. The optional fields are
+ * what the browser would have sent, so a download behind a login still works.
+ * The app keeps cookies in memory only and never logs them.
+ */
 export const downloadRequestSchema = z.object({
   type: z.literal("download"),
   version: z.literal(PROTOCOL_VERSION),
   url: z.url({ protocol: /^https?$/ }),
+  filename: z.string().min(1).max(255).optional(),
+  referrer: headerValue.optional(),
+  userAgent: headerValue.optional(),
+  /** The value of the `Cookie` header. */
+  cookies: headerValue.optional(),
 });
 export type DownloadRequest = z.infer<typeof downloadRequestSchema>;
 
