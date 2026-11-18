@@ -1,0 +1,21 @@
+[package]
+name = "mbiro-desktop"
+description = "Mbiro desktop app: Rust core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "mbiro_desktop"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.6", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.7", features = [] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["process", "net", "time", "sync", "macros", "rt-multi-thread", "io-util"] }
+# Talks to aria2's JSON-RPC on 127.0.0.1 only, so no TLS stack is compiled in.
+reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
+url = "2"

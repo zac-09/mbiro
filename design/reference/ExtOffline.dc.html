@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Extension popup: app not found</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+button,input{font-family:inherit}
+button{transition:background-color .15s ease,color .15s ease,border-color .15s ease}
+a{color:#C6F432}a:hover{color:#E4FF8A}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+@keyframes drop{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+@keyframes drain{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+.blink{animation:blink .9s steps(2,jump-none) infinite}
+.drop{animation:drop .6s cubic-bezier(.2,.7,.2,1) both}
+.drain{animation:drain 6s linear infinite;transform-origin:0 50%}
+@media (prefers-reduced-motion: reduce){.blink,.drop,.drain{animation:none}button{transition:none}}
+</style>
+</helmet>
+<div style="width: 340px; height: 380px; padding: 16px; gap: 16px; box-sizing: border-box; display: flex; flex-direction: column; background: #0C0D0E; color: #F2F4F5; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums">
+
+<div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid #2A2D30">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: 0.16em; color: #A7ADB2">MBIRO</span>
+<span style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; letter-spacing: 0.08em; color: #FF9A80"><span aria-hidden="true" style="width: 8px; height: 8px; background: #FF5A3C"></span>APP NOT FOUND</span>
+</div>
+
+<div class="drop" style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 46px; font-weight: 700; line-height: 0.92; letter-spacing: 0.02em">THE APP ISN’T RUNNING</div>
+
+<p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #D4D8DB">Downloads will stay in the browser until Mbiro is open on this Mac. Nothing is lost in the meantime.</p>
+
+<div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px">
+<button style="min-height: 48px; border: 0; border-radius: 2px; background: #C6F432; color: #0C0D0E; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 19px; font-weight: 700; letter-spacing: 0.1em; cursor: pointer">OPEN MBIRO</button>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<button style="min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">GET THE APP</button>
+<button style="min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">TRY AGAIN</button>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":340,"height":380}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

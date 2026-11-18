@@ -1,0 +1,12 @@
+pnpm-lock.yaml
+dist/
+target/
+.cache/
+design/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/icons/
+# Owner-written documents: not reformatted by tooling.
+AGENTS.md
+PLAN.md
+DESIGN.md
+FIRST-PROMPT.md

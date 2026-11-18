@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+.cache/
+.DS_Store
+*.log
+
+# Built by scripts/build-aria2.sh; never committed.
+apps/desktop/src-tauri/binaries/*
+!apps/desktop/src-tauri/binaries/.gitkeep
+apps/desktop/src-tauri/gen/

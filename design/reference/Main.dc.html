@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Main window</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+button,input{font-family:inherit}
+button{transition:background-color .15s ease,color .15s ease,border-color .15s ease}
+a{color:#C6F432}a:hover{color:#E4FF8A}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+@keyframes drop{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+.blink{animation:blink .9s steps(2,jump-none) infinite}
+.drop{animation:drop .7s cubic-bezier(.2,.7,.2,1) both}
+@media (prefers-reduced-motion: reduce){.blink,.drop{animation:none}button{transition:none}}
+</style>
+</helmet>
+<div style="min-height: 840px; box-sizing: border-box; padding: 22px 36px 24px; display: flex; flex-direction: column; gap: 14px; background: #0C0D0E; color: #F2F4F5; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums">
+
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 24px">
+<div style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: 0.16em; color: {{accent}}">MBIRO</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 4px">
+<button style="min-height: 44px; padding: 0 12px; border: 0; border-bottom: 2px solid {{accent}}; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; cursor: pointer">ALL 6</button>
+<button style="min-height: 44px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #A7ADB2; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">ACTIVE 3</button>
+<button style="min-height: 44px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #A7ADB2; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">DONE 2</button>
+<button style="min-height: 44px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #A7ADB2; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">FAILED 1</button>
+<div style="display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; margin-left: 16px; padding: 0 12px; border: 1px solid #3C4044; border-radius: 2px">
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A7ADB2" stroke-width="1.6" stroke-linecap="square"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.5 10.5L13.5 13.5"></path></svg>
+<input type="search" aria-label="Search downloads" placeholder="SEARCH" style="width: 150px; border: 0; outline: 0; background: transparent; font-size: 12px; letter-spacing: 0.08em; color: #F2F4F5">
+</div>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px 24px; padding: 14px 0 18px; border-top: 1px solid #2A2D30; border-bottom: 1px solid #2A2D30">
+<div class="drop" style="display: flex; align-items: baseline; gap: 16px">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 156px; font-weight: 700; line-height: 0.86; letter-spacing: -0.01em; color: {{accent}}">{{total}}</span>
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 34px; font-weight: 600; letter-spacing: 0.08em; color: #A7ADB2">MB/S</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 14px">
+<span style="font-size: 12px; letter-spacing: 0.08em; color: #A7ADB2">{{counts}}</span>
+<div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px">
+<button onClick="{{pauseAll}}" style="padding: 0 16px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">PAUSE ALL</button>
+<button onClick="{{resumeAll}}" style="padding: 0 16px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">RESUME ALL</button>
+<button style="min-height: 48px; padding: 0 24px; border: 0; border-radius: 2px; background: {{accent}}; color: #0C0D0E; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0.1em; cursor: pointer">+ ADD DOWNLOAD</button>
+</div>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column">
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; min-height: 78px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid #1F2224;">
+<div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div style="font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere">ubuntu-24.04.1-desktop-arm64.iso</div>
+<div style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">{{a.meta}}</div>
+</div>
+<div aria-hidden="true" style="flex: 0 1 382px; min-width: 0; display: flex; gap: 2px">
+<sc-for list="{{a.segs}}" as="s" hint-placeholder-count="32"><span class="{{s.cls}}" style="flex: 1 1 0; max-width: 10px; height: 26px; background: {{s.bg}}"></span></sc-for>
+</div>
+<div style="flex: 0 0 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 36px; font-weight: 600; line-height: 1; color: {{a.ink}}">{{a.pct}}</span>
+<span style="font-size: 11.5px; letter-spacing: 0.04em; color: #A7ADB2">{{a.sub}}</span>
+</div>
+<button onClick="{{a.toggle}}" style="flex: 0 0 116px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">{{a.btn}}</button>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; min-height: 78px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid #1F2224;">
+<div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div style="font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere">Building reliable job queues (1080p).mp4</div>
+<div style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">{{b.meta}}</div>
+</div>
+<div aria-hidden="true" style="flex: 0 1 382px; min-width: 0; display: flex; gap: 2px">
+<sc-for list="{{b.segs}}" as="s" hint-placeholder-count="32"><span class="{{s.cls}}" style="flex: 1 1 0; max-width: 10px; height: 26px; background: {{s.bg}}"></span></sc-for>
+</div>
+<div style="flex: 0 0 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 36px; font-weight: 600; line-height: 1; color: {{b.ink}}">{{b.pct}}</span>
+<span style="font-size: 11.5px; letter-spacing: 0.04em; color: #A7ADB2">{{b.sub}}</span>
+</div>
+<button onClick="{{b.toggle}}" style="flex: 0 0 116px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">{{b.btn}}</button>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; min-height: 78px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid #1F2224;">
+<div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div style="font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere">design-assets-2026.zip</div>
+<div style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">120 MB / 1.1 GB · ARCHIVES</div>
+</div>
+<div aria-hidden="true" style="flex: 0 1 382px; min-width: 0; display: flex; gap: 2px">
+<sc-for list="{{r3}}" as="s" hint-placeholder-count="32"><span class="{{s.cls}}" style="flex: 1 1 0; max-width: 10px; height: 26px; background: {{s.bg}}"></span></sc-for>
+</div>
+<div style="flex: 0 0 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 36px; font-weight: 600; line-height: 1; color: #A7ADB2">11%</span>
+<span style="font-size: 11.5px; letter-spacing: 0.04em; color: #A7ADB2">PAUSED</span>
+</div>
+<button style="flex: 0 0 116px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">RESUME</button>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; min-height: 78px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid #1F2224;">
+<div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div style="font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere">node-v22.11.0.pkg</div>
+<div style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">72 MB · APPS</div>
+</div>
+<div aria-hidden="true" style="flex: 0 1 382px; min-width: 0; display: flex; gap: 2px">
+<sc-for list="{{r4}}" as="s" hint-placeholder-count="32"><span class="{{s.cls}}" style="flex: 1 1 0; max-width: 10px; height: 26px; background: {{s.bg}}"></span></sc-for>
+</div>
+<div style="flex: 0 0 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 36px; font-weight: 600; line-height: 1; color: #A7ADB2">100%</span>
+<span style="font-size: 11.5px; letter-spacing: 0.04em; color: #A7ADB2">DONE · 10:42</span>
+</div>
+<button style="flex: 0 0 116px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">SHOW FILE</button>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; min-height: 78px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid #1F2224;">
+<div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div style="font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere">quarterly-report.pdf</div>
+<div style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">4.2 MB · DOCUMENTS</div>
+</div>
+<div aria-hidden="true" style="flex: 0 1 382px; min-width: 0; display: flex; gap: 2px">
+<sc-for list="{{r5}}" as="s" hint-placeholder-count="32"><span class="{{s.cls}}" style="flex: 1 1 0; max-width: 10px; height: 26px; background: {{s.bg}}"></span></sc-for>
+</div>
+<div style="flex: 0 0 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 36px; font-weight: 600; line-height: 1; color: #A7ADB2">100%</span>
+<span style="font-size: 11.5px; letter-spacing: 0.04em; color: #A7ADB2">DONE · 09:15</span>
+</div>
+<button style="flex: 0 0 116px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">SHOW FILE</button>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; min-height: 78px; box-sizing: border-box; padding: 10px 0;">
+<div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div style="font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere">dataset-export.tar.gz</div>
+<div style="font-size: 11.5px; letter-spacing: 0.06em; color: #FF9A80">CONNECTION CLOSED BY SERVER</div>
+</div>
+<div aria-hidden="true" style="flex: 0 1 382px; min-width: 0; display: flex; gap: 2px">
+<sc-for list="{{r6}}" as="s" hint-placeholder-count="32"><span class="{{s.cls}}" style="flex: 1 1 0; max-width: 10px; height: 26px; background: {{s.bg}}"></span></sc-for>
+</div>
+<div style="flex: 0 0 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 36px; font-weight: 600; line-height: 1; color: #FF9A80">14%</span>
+<span style="font-size: 11.5px; letter-spacing: 0.04em; color: #FF9A80">FAILED</span>
+</div>
+<button style="flex: 0 0 116px; min-height: 44px; border: 1px solid #FF9A80; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">RETRY</button>
+</div>
+
+</div>
+
+<div style="margin-top: auto; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid #2A2D30">
+<span style="font-size: 12px; letter-spacing: 0.08em; color: #A7ADB2">TRIAL · 9 DAYS LEFT</span>
+<button style="padding: 0 16px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">ENTER LICENCE KEY</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#C6F432","options":["#C6F432","#4DE8FF","#FFB020","#FF7AD9"]},"$preview":{"width":1280,"height":840}}'>
+class Component extends DCLogic {
+state = { t: 0, a: 1800, b: 310, pa: false, pb: false };
+
+componentDidMount() {
+if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+this.timer = setInterval(() => this.tick(), 600);
+}
+
+componentWillUnmount() {
+clearInterval(this.timer);
+}
+
+tick() {
+const s = this.state;
+const step = (done, start, total, rate, paused) => {
+if (paused) return done;
+const next = done + rate * 1.8;
+return next >= total ? start : next;
+};
+this.setState({
+t: s.t + 1,
+a: step(s.a, 1800, 2900, 8.1, s.pa),
+b: step(s.b, 310, 720, 4.3, s.pb)
+});
+}
+
+renderVals() {
+const s = this.state;
+const accent = this.props.accent ?? '#C6F432';
+const N = 32;
+const seg = (pct, color, live) => {
+const n = Math.max(1, Math.round((pct / 100) * N));
+return Array.from({ length: N }, (_, i) => ({
+bg: i < n ? color : '#24272A',
+cls: live && i === n - 1 ? 'blink' : ''
+}));
+};
+const size = (x) => (x >= 1000 ? (x / 1000).toFixed(1) + ' GB' : Math.round(x) + ' MB');
+const two = (n) => (n < 10 ? '0' + n : '' + n);
+const row = (done, total, speed, paused, key, label) => {
+const pct = Math.round((done / total) * 100);
+const secs = Math.floor((total - done) / speed);
+return {
+segs: seg(pct, paused ? '#7B8187' : accent, !paused),
+meta: size(done) + ' / ' + size(total) + ' · ' + label,
+pct: pct + '%',
+ink: paused ? '#A7ADB2' : '#F2F4F5',
+sub: paused ? 'PAUSED' : speed.toFixed(1) + ' MB/S · ' + two(Math.floor(secs / 60)) + ':' + two(secs % 60),
+btn: paused ? 'RESUME' : 'PAUSE',
+toggle: () => this.setState({ [key]: !this.state[key] })
+};
+};
+const sa = 8.1 + 0.5 * Math.sin(s.t * 0.9);
+const sb = 4.3 + 0.3 * Math.sin(s.t * 0.7);
+const sum = (s.pa ? 0 : sa) + (s.pb ? 0 : sb);
+const active = (s.pa ? 0 : 1) + (s.pb ? 0 : 1);
+return {
+accent: accent,
+a: row(s.a, 2900, sa, s.pa, 'pa', '16 CONN'),
+b: row(s.b, 720, sb, s.pb, 'pb', 'VIDEO'),
+r3: seg(11, '#7B8187', false),
+r4: seg(100, '#5E7417', false),
+r5: seg(100, '#5E7417', false),
+r6: seg(14, '#FF5A3C', false),
+total: sum.toFixed(1),
+counts: active + ' ACTIVE · ' + (3 - active) + ' PAUSED · 1 FAILED',
+pauseAll: () => this.setState({ pa: true, pb: true }),
+resumeAll: () => this.setState({ pa: false, pb: false })
+};
+}
+}
+</script>
+</body>
+</html>

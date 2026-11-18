@@ -1,0 +1,6 @@
+[package]
+name = "mbiro-nm-host"
+description = "Native messaging host. Placeholder until Spike 4."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true

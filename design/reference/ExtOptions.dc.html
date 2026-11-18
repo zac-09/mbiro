@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Extension: capture rules</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+button,input{font-family:inherit}
+button{transition:background-color .15s ease,color .15s ease,border-color .15s ease}
+a{color:#C6F432}a:hover{color:#E4FF8A}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+@keyframes drop{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+@keyframes drain{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+.blink{animation:blink .9s steps(2,jump-none) infinite}
+.drop{animation:drop .6s cubic-bezier(.2,.7,.2,1) both}
+.drain{animation:drain 6s linear infinite;transform-origin:0 50%}
+@media (prefers-reduced-motion: reduce){.blink,.drop,.drain{animation:none}button{transition:none}}
+</style>
+</helmet>
+<div style="width: 760px; height: 700px; padding: 28px 32px; gap: 22px; box-sizing: border-box; display: flex; flex-direction: column; background: #0C0D0E; color: #F2F4F5; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums">
+
+<div style="display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 16px; border-bottom: 1px solid #2A2D30">
+<h1 style="margin: 0; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 44px; font-weight: 700; line-height: 0.9; letter-spacing: 0.06em; color: #C6F432">CAPTURE RULES</h1>
+<span style="font-size: 11.5px; letter-spacing: 0.08em; color: #A7ADB2">MBIRO BROWSER EXTENSION</span>
+</div>
+
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 24px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: 0.06em">CATCH DOWNLOADS AUTOMATICALLY</span>
+<span style="font-size: 12px; line-height: 1.5; color: #A7ADB2">When off, use the right-click menu on a link.</span>
+</div>
+<div style="display: flex">
+<button aria-pressed="{{auto.on.pressed}}" onClick="{{auto.setOn}}" style="min-width: 48px; min-height: 44px; padding: 0 10px; border: 1px solid {{auto.on.border}}; border-radius: 0; background: {{auto.on.bg}}; color: {{auto.on.ink}}; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; cursor: pointer">ON</button>
+<button aria-pressed="{{auto.off.pressed}}" onClick="{{auto.setOff}}" style="min-width: 48px; min-height: 44px; padding: 0 10px; border: 1px solid {{auto.off.border}}; border-radius: 0; background: {{auto.off.bg}}; color: {{auto.off.ink}}; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; cursor: pointer">OFF</button>
+</div>
+</div>
+
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 24px; padding-top: 18px; border-top: 1px solid #1F2224">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="minsize" style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: 0.06em">ONLY FILES LARGER THAN</label>
+<span style="font-size: 12px; line-height: 1.5; color: #A7ADB2">Smaller files stay in the browser.</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px">
+<input id="minsize" type="number" value="5" style="width: 84px; min-height: 44px; box-sizing: border-box; padding: 0 12px; border: 1px solid #3C4044; border-radius: 2px; background: #141618; color: #F2F4F5; font-size: 14px; text-align: right">
+<span style="font-size: 12px; letter-spacing: 0.08em; color: #A7ADB2">MB</span>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 12px; padding-top: 18px; border-top: 1px solid #1F2224">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: 0.06em">FILE TYPES TO CATCH</span>
+<button style="padding: 0 14px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">EDIT LIST</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">ZIP</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">DMG</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">PKG</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">ISO</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">PDF</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">MP4</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">MKV</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">MP3</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">TAR.GZ</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">7Z</span><span style="display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid #3C4044; font-size: 12px; letter-spacing: 0.06em">EXE</span>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px; padding-top: 18px; border-top: 1px solid #1F2224">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<span style="font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: 0.06em">NEVER CATCH ON THESE SITES</span>
+<button style="padding: 0 14px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">ADD SITE</button>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 52px; border-bottom: 1px solid #1F2224;">
+<span style="font-size: 13px">drive.example.com</span>
+<button style="padding: 0 14px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">REMOVE</button>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 52px;">
+<span style="font-size: 13px">intranet.example.org</span>
+<button style="padding: 0 14px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">REMOVE</button>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":700}}'>
+class Component extends DCLogic {
+state = { auto: true };
+
+renderVals() {
+const sw = (key) => {
+const v = this.state[key];
+const face = (active) => ({
+pressed: active ? 'true' : 'false',
+border: active ? '#C6F432' : '#3C4044',
+bg: active ? '#C6F432' : 'transparent',
+ink: active ? '#0C0D0E' : '#A7ADB2'
+});
+return {
+on: face(v),
+off: face(!v),
+setOn: () => this.setState({ [key]: true }),
+setOff: () => this.setState({ [key]: false })
+};
+};
+return { auto: sw('auto') };
+}
+}
+</script>
+</body>
+</html>

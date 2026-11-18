@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Add download: video link</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+button,input{font-family:inherit}
+button{transition:background-color .15s ease,color .15s ease,border-color .15s ease}
+a{color:#C6F432}a:hover{color:#E4FF8A}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+@keyframes drop{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+.blink{animation:blink .9s steps(2,jump-none) infinite}
+.drop{animation:drop .7s cubic-bezier(.2,.7,.2,1) both}
+@media (prefers-reduced-motion: reduce){.blink,.drop{animation:none}button{transition:none}}
+</style>
+</helmet>
+<div style="width: 560px; height: 720px; box-sizing: border-box; padding: 28px; display: flex; flex-direction: column; gap: 20px; background: #0C0D0E; color: #F2F4F5; font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums">
+
+<h1 class="drop" style="margin: 0; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 40px; font-weight: 700; line-height: 0.9; letter-spacing: 0.06em; color: {{accent}}">ADD DOWNLOAD</h1>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<label for="url" style="font-size: 11.5px; letter-spacing: 0.1em; color: #A7ADB2">LINK</label>
+<input id="url" type="url" value="https://example.com/talks/reliable-job-queues" style="min-height: 46px; box-sizing: border-box; padding: 0 12px; border: 1px solid #3C4044; border-radius: 2px; background: #141618; font-size: 13px; color: #F2F4F5">
+</div>
+
+<div style="display: flex; gap: 14px; padding: 12px 0; border-top: 1px solid #2A2D30; border-bottom: 1px solid #2A2D30">
+<div style="flex: 0 0 128px; height: 72px; background: #1B1E20; display: flex; align-items: center; justify-content: center; font-size: 11px; letter-spacing: 0.1em; color: #A7ADB2">THUMBNAIL</div>
+<div style="min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 6px">
+<div style="font-size: 14px; font-weight: 500">Building reliable job queues</div>
+<div style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">VIDEO · 42:18 · EXAMPLE.COM</div>
+</div>
+</div>
+
+<fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 8px">
+<legend style="padding: 0 0 8px; font-size: 11.5px; letter-spacing: 0.1em; color: #A7ADB2">QUALITY</legend>
+
+<label style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; border: 1px solid {{q0.border}}; border-radius: 2px; background: {{q0.bg}}; cursor: pointer; transition: background-color .2s ease, border-color .2s ease">
+<input type="radio" name="quality" checked="{{q0.on}}" onChange="{{q0.pick}}" style="width: 16px; height: 16px; margin: 0; accent-color: {{accent}}">
+<span style="flex: 1 1 auto; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 21px; font-weight: 600; letter-spacing: 0.06em">BEST AVAILABLE</span>
+<span style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">1080P · MP4 · ~720 MB</span>
+</label>
+
+<label style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; border: 1px solid {{q1.border}}; border-radius: 2px; background: {{q1.bg}}; cursor: pointer; transition: background-color .2s ease, border-color .2s ease">
+<input type="radio" name="quality" checked="{{q1.on}}" onChange="{{q1.pick}}" style="width: 16px; height: 16px; margin: 0; accent-color: {{accent}}">
+<span style="flex: 1 1 auto; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 21px; font-weight: 600; letter-spacing: 0.06em">720P</span>
+<span style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">MP4 · ~410 MB</span>
+</label>
+
+<label style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; border: 1px solid {{q2.border}}; border-radius: 2px; background: {{q2.bg}}; cursor: pointer; transition: background-color .2s ease, border-color .2s ease">
+<input type="radio" name="quality" checked="{{q2.on}}" onChange="{{q2.pick}}" style="width: 16px; height: 16px; margin: 0; accent-color: {{accent}}">
+<span style="flex: 1 1 auto; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 21px; font-weight: 600; letter-spacing: 0.06em">480P</span>
+<span style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">MP4 · ~190 MB</span>
+</label>
+
+<label style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; border: 1px solid {{q3.border}}; border-radius: 2px; background: {{q3.bg}}; cursor: pointer; transition: background-color .2s ease, border-color .2s ease">
+<input type="radio" name="quality" checked="{{q3.on}}" onChange="{{q3.pick}}" style="width: 16px; height: 16px; margin: 0; accent-color: {{accent}}">
+<span style="flex: 1 1 auto; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 21px; font-weight: 600; letter-spacing: 0.06em">AUDIO ONLY</span>
+<span style="font-size: 11.5px; letter-spacing: 0.06em; color: #A7ADB2">M4A · ~38 MB</span>
+</label>
+
+<a href="#formats" style="align-self: flex-start; padding: 6px 0; font-size: 12px; letter-spacing: 0.08em">SHOW ALL FORMATS</a>
+</fieldset>
+
+<div style="display: flex; align-items: center; gap: 12px">
+<div style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 11.5px; letter-spacing: 0.1em; color: #A7ADB2">SAVE TO</span>
+<span style="font-size: 13px">~/Downloads/Video</span>
+</div>
+<button style="padding: 0 16px; min-height: 44px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">CHANGE</button>
+</div>
+
+<div style="margin-top: auto; display: flex; justify-content: flex-end; gap: 10px; padding-top: 16px; border-top: 1px solid #2A2D30">
+<button style="min-height: 48px; padding: 0 18px; border: 1px solid #3C4044; border-radius: 2px; background: transparent; color: #F2F4F5; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; cursor: pointer">CANCEL</button>
+<button style="min-height: 48px; padding: 0 28px; border: 0; border-radius: 2px; background: {{accent}}; color: #0C0D0E; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: 20px; font-weight: 700; letter-spacing: 0.1em; cursor: pointer">DOWNLOAD</button>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#C6F432","options":["#C6F432","#4DE8FF","#FFB020","#FF7AD9"]},"$preview":{"width":560,"height":720}}'>
+class Component extends DCLogic {
+state = { pick: 0 };
+
+renderVals() {
+const accent = this.props.accent ?? '#C6F432';
+const opt = (i) => {
+const on = this.state.pick === i;
+return {
+on: on,
+border: on ? accent : '#3C4044',
+bg: on ? '#1A1F0C' : 'transparent',
+pick: () => this.setState({ pick: i })
+};
+};
+return { accent: accent, q0: opt(0), q1: opt(1), q2: opt(2), q3: opt(3) };
+}
+}
+</script>
+</body>
+</html>
