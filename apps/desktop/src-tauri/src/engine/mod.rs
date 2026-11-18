@@ -4,6 +4,7 @@
 //! yt-dlp will be another.
 
 pub mod aria2;
+pub mod ytdlp;
 
 use std::fmt;
 use std::future::Future;

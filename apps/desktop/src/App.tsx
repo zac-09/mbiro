@@ -3,13 +3,23 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState, type FormEvent } from "react";
 import { formatBytes, formatSpeed, percent } from "./format";
 import { strings } from "./strings";
-import { SNAPSHOT_EVENT, type EngineHealth, type JobStatus } from "./types";
+import {
+  SNAPSHOT_EVENT,
+  TOOL_PROGRESS_EVENT,
+  type EngineHealth,
+  type JobStatus,
+  type ToolProgress,
+  type ToolStatus,
+} from "./types";
 
 export function App() {
   const [health, setHealth] = useState<EngineHealth>({ status: "starting" });
   const [jobs, setJobs] = useState<JobStatus[]>([]);
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [tools, setTools] = useState<ToolStatus[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [toolProgress, setToolProgress] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -19,10 +29,19 @@ export function App() {
     void invoke<JobStatus[]>("list_downloads").then((list) => {
       if (!cancelled) setJobs(list);
     });
+    void invoke<ToolStatus[]>("tools_status").then((list) => {
+      if (!cancelled) setTools(list);
+    });
     const unlisten = listen<JobStatus[]>(SNAPSHOT_EVENT, (event) => setJobs(event.payload));
+    const unlistenTools = listen<ToolProgress>(TOOL_PROGRESS_EVENT, ({ payload }) => {
+      if (!payload.total) return;
+      const done = Math.floor((payload.received / payload.total) * 100);
+      setToolProgress((current) => ({ ...current, [payload.name]: done }));
+    });
     return () => {
       cancelled = true;
       void unlisten.then((stop) => stop());
+      void unlistenTools.then((stop) => stop());
     };
   }, []);
 
@@ -31,15 +50,32 @@ export function App() {
     invoke(command, args).catch((reason: unknown) => setError(String(reason)));
   };
 
-  const onSubmit = (event: FormEvent) => {
-    event.preventDefault();
+  const add = (command: "add_download" | "add_video") => {
     const trimmed = url.trim();
     if (!trimmed) return;
     setError(null);
-    invoke("add_download", { url: trimmed })
+    invoke(command, { url: trimmed })
       .then(() => setUrl(""))
       .catch((reason: unknown) => setError(String(reason)));
   };
+
+  const onSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    add("add_download");
+  };
+
+  const fetchTools = () => {
+    setError(null);
+    setFetching(true);
+    invoke("fetch_tools")
+      .catch((reason: unknown) => setError(String(reason)))
+      .finally(() => {
+        setFetching(false);
+        void invoke<ToolStatus[]>("tools_status").then(setTools);
+      });
+  };
+
+  const toolsReady = tools.length > 0 && tools.every((tool) => tool.installed);
 
   const totalSpeed = jobs.reduce((sum, job) => sum + job.speedBps, 0);
 
@@ -69,7 +105,11 @@ export function App() {
         <button type="submit" disabled={health.status !== "ready"}>
           {strings.add}
         </button>
+        <button type="button" disabled={!toolsReady} onClick={() => add("add_video")}>
+          {strings.addVideo}
+        </button>
       </form>
+      <p className="notice">{strings.urlLabelHint}</p>
 
       {error && (
         <p className="error" role="alert">
@@ -117,6 +157,32 @@ export function App() {
           })}
         </ul>
       )}
+
+      <section className="tools">
+        <h2>{strings.toolsHeading}</h2>
+        <p className="notice">{strings.toolsIntro}</p>
+        <ul>
+          {tools.map((tool) => (
+            <li key={tool.name}>
+              <span>
+                {tool.name} {tool.version}
+              </span>
+              <span className="detail">
+                {tool.installed
+                  ? strings.toolInstalled
+                  : fetching && toolProgress[tool.name] !== undefined
+                    ? strings.toolProgress(toolProgress[tool.name] ?? 0)
+                    : strings.toolMissing}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {!toolsReady && (
+          <button type="button" disabled={fetching} onClick={fetchTools}>
+            {fetching ? strings.toolsFetching : strings.toolsFetch}
+          </button>
+        )}
+      </section>
     </main>
   );
 }

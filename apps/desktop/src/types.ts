@@ -19,3 +19,18 @@ export type EngineHealth =
   | { status: "failed"; reason: string };
 
 export const SNAPSHOT_EVENT = "downloads:snapshot";
+
+/** Mirrors `ToolStatus` and `ToolProgress` in src-tauri/src/lib.rs. */
+export interface ToolStatus {
+  name: string;
+  version: string;
+  installed: boolean;
+}
+
+export interface ToolProgress {
+  name: string;
+  received: number;
+  total: number | null;
+}
+
+export const TOOL_PROGRESS_EVENT = "tools:progress";

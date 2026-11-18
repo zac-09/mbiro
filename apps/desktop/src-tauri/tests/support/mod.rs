@@ -4,6 +4,9 @@
 //! each connection so a download lasts long enough to observe. Dropping
 //! connections and refusing `Range` are added when M1 needs them.
 
+// Each test file uses its own part of this module.
+#![allow(dead_code)]
+
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -68,12 +71,10 @@ impl TestServer {
     }
 
     /// The request line and headers of every request received so far.
-    #[allow(dead_code)]
     pub fn request_heads(&self) -> Vec<String> {
         self.heads.lock().unwrap().clone()
     }
 
-    #[allow(dead_code)]
     pub fn open_connections(&self) -> usize {
         self.open.load(Ordering::SeqCst)
     }
@@ -154,4 +155,59 @@ fn parse_range(spec: &str, len: usize) -> Option<(usize, usize)> {
         end.parse::<usize>().ok()?.min(len - 1)
     };
     (start <= end).then_some((start, end))
+}
+
+/// Serves the files of one folder, whole, at their names. Enough for a media
+/// manifest and its segments.
+pub async fn serve_folder(dir: std::path::PathBuf) -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind folder server");
+    let addr = listener.local_addr().expect("folder server address");
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let dir = dir.clone();
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut buf = [0u8; 1024];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf).await {
+                        Ok(n) if n > 0 && head.len() < 16 * 1024 => {
+                            head.extend_from_slice(&buf[..n])
+                        }
+                        _ => return,
+                    }
+                }
+                let head = String::from_utf8_lossy(&head).into_owned();
+                let name = head
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|path| path.split('?').next())
+                    .map(|path| path.trim_start_matches('/').to_owned())
+                    .filter(|name| !name.is_empty() && !name.contains(['/', '\\']) && name != "..");
+                let file = match name {
+                    Some(name) => tokio::fs::read(dir.join(name)).await.ok(),
+                    None => None,
+                };
+                let response = match &file {
+                    Some(bytes) => format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        bytes.len()
+                    ),
+                    None => {
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .into()
+                    }
+                };
+                let _ = stream.write_all(response.as_bytes()).await;
+                if let Some(bytes) = file {
+                    if !head.starts_with("HEAD ") {
+                        let _ = stream.write_all(&bytes).await;
+                    }
+                }
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    addr
 }

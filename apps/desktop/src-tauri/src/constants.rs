@@ -9,3 +9,6 @@ pub const NM_HOST_BINARY: &str = "nm-host";
 
 /// Event carrying the full list of jobs, sent once a second.
 pub const SNAPSHOT_EVENT: &str = "downloads:snapshot";
+
+/// Event carrying the download progress of one helper tool.
+pub const TOOL_PROGRESS_EVENT: &str = "tools:progress";

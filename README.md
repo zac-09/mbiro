@@ -32,6 +32,13 @@ pnpm lint && pnpm typecheck && pnpm test   # TypeScript
 pnpm check:rust                            # fmt, clippy, tests (drives the real aria2c against a local server)
 ```
 
+The video path has one more test. It fetches the real helper tools (about 150 MB,
+kept in `target/test-tools`), then downloads and merges a clip served from this Mac:
+
+```sh
+cargo test -p mbiro-desktop --test video -- --ignored
+```
+
 ## Browser extension (development)
 
 Start the app once first: on launch it tells each installed browser where the
