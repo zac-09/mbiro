@@ -234,7 +234,7 @@ M2 and M3 are independent after M1 and can swap order.
 
 If spike 2 or 3 fails, the packaging design changes. Nothing in M1 starts before both pass.
 
-- [ ] Monorepo created with the layout above and an empty Tauri 2 app that builds.
+- [x] Monorepo created with the layout above and an empty Tauri 2 app that builds.
 - [ ] **Spike 1, engine:** build a static universal `aria2c`, start it from the Rust core, add a download over JSON-RPC, show live progress in the window.
 - [ ] **Spike 2, signing:** sign and notarise that build with `aria2c` inside, and open it on a second Mac that has never seen it. Agent writes the scripts; Isaac runs them.
 - [ ] **Spike 3, tools:** from the notarised build, fetch yt-dlp, Deno and ffmpeg into Application Support, then download and merge one video.
