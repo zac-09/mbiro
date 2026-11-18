@@ -9,6 +9,7 @@ pub mod jobs;
 mod shell;
 mod strings;
 pub mod tools;
+pub mod video;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -139,6 +140,8 @@ struct DownloadSpec {
     filename: Option<String>,
     connections: Option<u8>,
     context: BrowserContext,
+    video: Option<engine::VideoOptions>,
+    title: Option<String>,
 }
 
 /// The one way a download enters the queue, whether asked for by the window or a browser.
@@ -181,6 +184,8 @@ fn queue_download(state: &AppState, spec: DownloadSpec) -> Result<i64, AddError>
             user_agent,
             cookies,
         },
+        video: spec.video,
+        title: spec.title,
     };
     state.manager.add(job).map_err(AddError::Storage)
 }
@@ -199,13 +204,42 @@ fn add_download(
         filename: None,
         connections,
         context: BrowserContext::default(),
+        video: None,
+        title: None,
     };
     queue_download(&state, spec).map_err(AddError::message)
 }
 
-/// Hands a page address to yt-dlp. Which pages work is yt-dlp's business.
+fn http_url(text: &str) -> Result<Url, String> {
+    let url = Url::parse(text.trim()).map_err(|_| strings::URL_INVALID.to_owned())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(strings::URL_SCHEME_UNSUPPORTED.to_owned());
+    }
+    Ok(url)
+}
+
+/// Looks a page up with yt-dlp so the add dialog can offer its qualities.
+/// Which pages work is yt-dlp's business.
 #[tauri::command]
-fn add_video(state: State<'_, AppState>, url: String, dir: Option<String>) -> Result<i64, String> {
+async fn probe_video(state: State<'_, AppState>, url: String) -> Result<video::VideoInfo, String> {
+    let url = http_url(&url)?;
+    let engine = state.manager.video_engine().ok_or(strings::TOOLS_MISSING)?;
+    video::probe(engine.tools(), &url).await
+}
+
+/// Queues a video with the quality picked in the add dialog.
+#[tauri::command]
+fn add_video(
+    state: State<'_, AppState>,
+    url: String,
+    dir: Option<String>,
+    quality: Option<video::Quality>,
+    title: Option<String>,
+) -> Result<i64, String> {
+    let video = match quality {
+        Some(quality) => Some(quality.options().ok_or(strings::REQUEST_INVALID)?),
+        None => None,
+    };
     let spec = DownloadSpec {
         kind: Kind::Video,
         url,
@@ -213,6 +247,9 @@ fn add_video(state: State<'_, AppState>, url: String, dir: Option<String>) -> Re
         filename: None,
         connections: Some(1),
         context: BrowserContext::default(),
+        video,
+        // Shown in the list until yt-dlp reports the file name.
+        title: title.map(|t| t.chars().filter(|c| !c.is_control()).take(200).collect()),
     };
     queue_download(&state, spec).map_err(AddError::message)
 }
@@ -307,6 +344,8 @@ async fn serve_browsers(app: AppHandle, listener: tokio::net::UnixListener) {
                     user_agent: request.user_agent,
                     cookies: request.cookies,
                 },
+                video: None,
+                title: None,
             };
             match queue_download(&app.state::<AppState>(), spec) {
                 Ok(id) => ipc::Ack::accepted(id.to_string()),
@@ -480,6 +519,7 @@ pub fn run() {
             add_defaults,
             add_download,
             add_video,
+            probe_video,
             pause_download,
             resume_download,
             retry_download,

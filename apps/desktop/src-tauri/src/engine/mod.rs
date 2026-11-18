@@ -75,6 +75,15 @@ pub struct BrowserContext {
     pub cookies: Option<Secret>,
 }
 
+/// How a video is to be fetched, in yt-dlp's terms.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoOptions {
+    /// A yt-dlp format selector.
+    pub format: String,
+    /// Keep only the sound.
+    pub audio_only: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct AddRequest {
     pub url: Url,
@@ -83,6 +92,8 @@ pub struct AddRequest {
     /// A plain file name to save as. `None` lets the engine pick one.
     pub filename: Option<String>,
     pub context: BrowserContext,
+    /// Only the video engine reads this. `None` is its default: the best on offer.
+    pub video: Option<VideoOptions>,
 }
 
 #[derive(Debug)]

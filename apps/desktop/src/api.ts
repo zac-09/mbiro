@@ -36,6 +36,40 @@ export interface ToolProgress {
   total: number | null;
 }
 
+/** Mirrors `Quality`, `Preset`, `FormatRow` and `VideoInfo` in src-tauri/src/video.rs. */
+export type Quality =
+  | { kind: "best" }
+  | { kind: "max"; height: number }
+  | { kind: "audio" }
+  | { kind: "format"; id: string; audio_only: boolean };
+
+export interface Preset {
+  quality: Quality;
+  height: number | null;
+  ext: string;
+  approxBytes: number | null;
+}
+
+export interface FormatRow {
+  quality: Quality;
+  height: number | null;
+  fps: number | null;
+  ext: string;
+  hasVideo: boolean;
+  hasAudio: boolean;
+  approxBytes: number | null;
+}
+
+export interface VideoInfo {
+  title: string;
+  durationSecs: number | null;
+  host: string;
+  /** A `data:` URL, or null when the page has no picture. */
+  thumbnail: string | null;
+  presets: Preset[];
+  formats: FormatRow[];
+}
+
 export interface AddDefaults {
   dir: string;
   connections: number;
@@ -52,7 +86,9 @@ export const api = {
   addDefaults: () => invoke<AddDefaults>("add_defaults"),
   add: (url: string, dir: string | null, connections: number) =>
     invoke<number>("add_download", { url, dir, connections }),
-  addVideo: (url: string, dir: string | null) => invoke<number>("add_video", { url, dir }),
+  probeVideo: (url: string) => invoke<VideoInfo>("probe_video", { url }),
+  addVideo: (url: string, dir: string | null, quality: Quality | null, title: string | null) =>
+    invoke<number>("add_video", { url, dir, quality, title }),
   pause: (id: number) => invoke<null>("pause_download", { id }),
   resume: (id: number) => invoke<null>("resume_download", { id }),
   retry: (id: number) => invoke<null>("retry_download", { id }),

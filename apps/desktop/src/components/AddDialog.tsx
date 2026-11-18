@@ -1,9 +1,17 @@
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { TOOL_PROGRESS_EVENT, api, type AddDefaults, type ToolProgress } from "../api";
+import {
+  TOOL_PROGRESS_EVENT,
+  api,
+  type AddDefaults,
+  type Quality,
+  type ToolProgress,
+  type VideoInfo,
+} from "../api";
 import { strings } from "../strings";
 import { fieldLabel, primaryButton, secondaryButton } from "../ui";
+import { QualityPicker } from "./QualityPicker";
 
 type Kind = "file" | "video";
 
@@ -27,6 +35,11 @@ export function AddDialog({ initialUrl, onClose }: Props) {
   const [toolsReady, setToolsReady] = useState(true);
   const [fetching, setFetching] = useState<ToolProgress | "starting" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** What yt-dlp says about the link: not asked yet, being asked, or its answer. */
+  const [video, setVideo] = useState<{ link: string; info: VideoInfo } | null>(null);
+  const [quality, setQuality] = useState<Quality>({ kind: "best" });
+  /** A link yt-dlp could make nothing of, so it is not shown as still being read. */
+  const [failedLink, setFailedLink] = useState<string | null>(null);
 
   useEffect(() => {
     dialog.current?.showModal();
@@ -40,6 +53,43 @@ export function AddDialog({ initialUrl, onClose }: Props) {
     );
     return () => void unlisten.then((stop) => stop());
   }, []);
+
+  // A video page is looked up once the link has stopped changing.
+  const probeable = kind === "video" && toolsReady && /^https?:\/\/\S+\.\S+/i.test(url.trim());
+  useEffect(() => {
+    if (!probeable) return;
+    const link = url.trim();
+    if (video?.link === link || failedLink === link) return;
+    let current = true;
+    const timer = setTimeout(() => {
+      setError(null);
+      api
+        .probeVideo(link)
+        .then((info) => {
+          if (!current) return;
+          setVideo({ link, info });
+          setQuality(info.presets[0]?.quality ?? { kind: "best" });
+        })
+        .catch((reason: unknown) => {
+          if (!current) return;
+          setFailedLink(link);
+          setError(String(reason));
+        });
+    }, 600);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [url, probeable, video, failedLink]);
+  // An answer only counts while the link it was for is still the one in the field.
+  const link = url.trim();
+  const found: VideoInfo | "reading" | null = !probeable
+    ? null
+    : video?.link === link
+      ? video.info
+      : failedLink === link
+        ? null
+        : "reading";
 
   const chooseFolder = async () => {
     const picked = await open({ directory: true, defaultPath: dir ?? defaults?.dir });
@@ -58,35 +108,31 @@ export function AddDialog({ initialUrl, onClose }: Props) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const link = url.trim();
     if (!link) return;
     setError(null);
-    const added = kind === "video" ? api.addVideo(link, dir) : api.add(link, dir, connections);
+    const info = found !== null && found !== "reading" ? found : null;
+    const added =
+      kind === "video"
+        ? api.addVideo(link, dir, info ? quality : null, info?.title ?? null)
+        : api.add(link, dir, connections);
     added.then(onClose).catch((reason: unknown) => setError(String(reason)));
   };
 
-  const option = (value: Kind, name: string, detail: string) => {
-    const on = kind === value;
-    return (
-      <label
-        className={`flex min-h-[52px] cursor-pointer items-center gap-3 rounded-[2px] border px-[14px] transition-colors duration-200 ${
-          on ? "border-accent bg-accent-wash" : "border-border bg-transparent"
-        }`}
-      >
-        <input
-          type="radio"
-          name="kind"
-          checked={on}
-          onChange={() => setKind(value)}
-          className="m-0 h-4 w-4 accent-accent"
-        />
-        <span className="flex-auto font-display text-[21px] font-semibold tracking-[0.06em]">
-          {name}
-        </span>
-        <span className="text-[11.5px] tracking-[0.06em] text-muted">{detail}</span>
-      </label>
-    );
-  };
+  // Two joined buttons, as the design's on/off switch: the chosen side is filled.
+  const side = (value: Kind, name: string) => (
+    <button
+      type="button"
+      aria-pressed={kind === value}
+      onClick={() => setKind(value)}
+      className={`min-h-[44px] cursor-pointer border px-4 text-[12px] font-medium tracking-[0.08em] first:rounded-l-[2px] last:rounded-r-[2px] ${
+        kind === value
+          ? "border-accent bg-accent text-bg"
+          : "border-border bg-transparent text-muted"
+      }`}
+    >
+      {name}
+    </button>
+  );
 
   const needsTools = kind === "video" && !toolsReady;
   const fetchLabel =
@@ -104,9 +150,9 @@ export function AddDialog({ initialUrl, onClose }: Props) {
       ref={dialog}
       onClose={onClose}
       aria-labelledby="add-heading"
-      className="m-auto w-[560px] max-w-[calc(100vw-32px)] rounded-[2px] border border-rule-strong bg-bg p-0 text-ink backdrop:bg-black/70"
+      className="m-auto max-h-[calc(100vh-32px)] w-[560px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-[2px] border border-rule-strong bg-bg p-0 text-ink backdrop:bg-black/70"
     >
-      <form onSubmit={submit} className="box-border flex min-h-[560px] flex-col gap-5 p-7">
+      <form onSubmit={submit} className="box-border flex min-h-[420px] flex-col gap-5 p-7">
         <h1
           id="add-heading"
           className="animate-drop m-0 font-display text-[40px] leading-[0.9] font-bold tracking-[0.06em] text-accent"
@@ -131,11 +177,13 @@ export function AddDialog({ initialUrl, onClose }: Props) {
           />
         </div>
 
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className={`${fieldLabel} p-0 pb-2`}>{strings.add.type}</legend>
-          {option("file", strings.add.file, strings.add.fileDetail)}
-          {option("video", strings.add.video, strings.add.videoDetail)}
-        </fieldset>
+        <div className="flex items-center gap-3" role="group" aria-label={strings.add.type}>
+          <span className={`${fieldLabel} flex-auto`}>{strings.add.type}</span>
+          <div className="flex">
+            {side("file", strings.add.file)}
+            {side("video", strings.add.video)}
+          </div>
+        </div>
 
         {kind === "file" && (
           <div className="flex items-center gap-3">
@@ -152,6 +200,15 @@ export function AddDialog({ initialUrl, onClose }: Props) {
               className="box-border min-h-[44px] w-[88px] rounded-[2px] border border-border bg-field px-3 text-[13px] text-ink"
             />
           </div>
+        )}
+
+        {found === "reading" && (
+          <p className="m-0 border-y border-rule-strong py-3 text-[11.5px] tracking-[0.1em] text-muted">
+            {strings.add.reading}
+          </p>
+        )}
+        {found !== null && found !== "reading" && (
+          <QualityPicker info={found} picked={quality} onPick={setQuality} />
         )}
 
         {needsTools && (
@@ -192,7 +249,11 @@ export function AddDialog({ initialUrl, onClose }: Props) {
           >
             {strings.add.cancel}
           </button>
-          <button type="submit" className={`${primaryButton} px-7`} disabled={needsTools}>
+          <button
+            type="submit"
+            className={`${primaryButton} px-7`}
+            disabled={needsTools || found === "reading"}
+          >
             {strings.add.download}
           </button>
         </div>

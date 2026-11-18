@@ -48,3 +48,10 @@ export function percent(job: Pick<Job, "state" | "totalBytes" | "completedBytes"
 export function filledBlocks(pct: number, blocks: number): number {
   return Math.min(blocks, Math.max(1, Math.round((pct / 100) * blocks)));
 }
+
+/** A length as `42:18`, or `1:02:15` from an hour up. */
+export function duration(seconds: number): string {
+  const secs = Math.max(0, Math.round(seconds));
+  const [h, m, s] = [Math.floor(secs / 3600), Math.floor((secs % 3600) / 60), secs % 60];
+  return h > 0 ? `${h}:${two(m)}:${two(s)}` : `${two(m)}:${two(s)}`;
+}

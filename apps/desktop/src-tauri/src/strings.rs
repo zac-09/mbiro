@@ -15,3 +15,6 @@ pub const TOOL_CHECKSUM_FAILED: &str =
 pub const FILE_MISSING: &str = "The file is no longer where it was saved.";
 pub const FOLDER_MISSING: &str = "That folder does not exist. Choose another.";
 pub const NOTIFY_FINISHED: &str = "Download finished";
+pub const VIDEO_PROBE_FAILED: &str =
+    "No video could be found at that link. Check it and try again.";
+pub const VIDEO_PROBE_SLOW: &str = "Reading that page took too long. Try again.";

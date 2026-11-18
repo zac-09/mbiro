@@ -44,6 +44,10 @@ pub struct YtDlpEngine {
 }
 
 impl YtDlpEngine {
+    pub fn tools(&self) -> &ToolPaths {
+        &self.tools
+    }
+
     pub fn new(tools: ToolPaths) -> Self {
         Self {
             tools,
@@ -54,6 +58,18 @@ impl YtDlpEngine {
 
     fn command(&self, request: &AddRequest) -> Command {
         let mut command = Command::new(&self.tools.yt_dlp);
+        match &request.video {
+            Some(video) if video.audio_only => {
+                command.args(["--format", &video.format, "--extract-audio"]);
+            }
+            Some(video) => {
+                command.args(["--format", &video.format, "--merge-output-format", "mp4"]);
+            }
+            // Best video with best audio, merged; else the best single file.
+            None => {
+                command.args(["--format", "bv*+ba/b", "--merge-output-format", "mp4"]);
+            }
+        }
         command
             .arg("--ignore-config")
             .arg("--no-playlist")
@@ -61,8 +77,6 @@ impl YtDlpEngine {
             .arg(format!("deno:{}", self.tools.deno.display()))
             .arg("--ffmpeg-location")
             .arg(&self.tools.ffmpeg)
-            // Best video with best audio, merged; else the best single file.
-            .args(["--format", "bv*+ba/b", "--merge-output-format", "mp4"])
             .arg("--paths")
             .arg(&request.dir)
             .args(["--output", "%(title).200B.%(ext)s"])

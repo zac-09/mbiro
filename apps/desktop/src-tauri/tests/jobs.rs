@@ -53,6 +53,8 @@ fn file(url: String, connections: u8) -> NewJob {
         filename: None,
         connections: Some(connections),
         context: BrowserContext::default(),
+        video: None,
+        title: None,
     }
 }
 

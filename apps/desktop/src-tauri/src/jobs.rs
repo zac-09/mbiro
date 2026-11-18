@@ -17,7 +17,7 @@ use url::Url;
 use crate::engine::aria2::Aria2Engine;
 use crate::engine::ytdlp::YtDlpEngine;
 use crate::engine::{
-    AddRequest, BrowserContext, Engine, EngineError, JobState, JobStatus, Secret,
+    AddRequest, BrowserContext, Engine, EngineError, JobState, JobStatus, Secret, VideoOptions,
     DEFAULT_CONNECTIONS, MAX_CONNECTIONS,
 };
 
@@ -104,6 +104,7 @@ struct Job {
     filename: Option<String>,
     wanted_connections: u8,
     context: BrowserContext,
+    video: Option<VideoOptions>,
 }
 
 /// What is known about a download when it is asked for.
@@ -115,6 +116,10 @@ pub struct NewJob {
     pub filename: Option<String>,
     pub connections: Option<u8>,
     pub context: BrowserContext,
+    /// The quality chosen for a video. `None` is the best on offer.
+    pub video: Option<VideoOptions>,
+    /// What to call it in the list until the engine knows the file name.
+    pub title: Option<String>,
 }
 
 /// What an engine currently knows about one job.
@@ -159,7 +164,8 @@ fn now() -> i64 {
 }
 
 const COLUMNS: &str = "id, kind, url, dir, name, filename, state, total_bytes, completed_bytes, \
-                       connections, error, referrer, user_agent, cookies, created_at, finished_at";
+                       connections, error, referrer, user_agent, cookies, created_at, finished_at, \
+                       video_format, audio_only";
 
 fn read_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     Ok(Job {
@@ -185,6 +191,16 @@ fn read_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
             user_agent: row.get(12)?,
             cookies: row.get::<_, Option<String>>(13)?.map(Secret::new),
         },
+        video: row
+            .get::<_, Option<String>>(16)?
+            .map(|format| VideoOptions {
+                format,
+                audio_only: row
+                    .get::<_, Option<bool>>(17)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false),
+            }),
     })
 }
 
@@ -224,6 +240,18 @@ impl Manager {
             UPDATE jobs SET state = 'queued' WHERE state = 'active';",
         )
         .map_err(db_err)?;
+        // Columns added after the first version. Each step runs once.
+        let version: i64 = db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(db_err)?;
+        if version < 1 {
+            db.execute_batch(
+                "ALTER TABLE jobs ADD COLUMN video_format TEXT;
+                 ALTER TABLE jobs ADD COLUMN audio_only INTEGER;
+                 PRAGMA user_version = 1;",
+            )
+            .map_err(db_err)?;
+        }
 
         Ok(Self {
             db: Mutex::new(db),
@@ -256,7 +284,7 @@ impl Manager {
             .get_or_insert(engine);
     }
 
-    fn video_engine(&self) -> Option<Arc<YtDlpEngine>> {
+    pub fn video_engine(&self) -> Option<Arc<YtDlpEngine>> {
         self.videos.lock().expect("videos lock").clone()
     }
 
@@ -321,6 +349,7 @@ impl Manager {
         let name = job
             .filename
             .clone()
+            .or(job.title.clone())
             .unwrap_or_else(|| placeholder_name(&job.url));
         let connections = job
             .connections
@@ -329,8 +358,9 @@ impl Manager {
         self.with_db(|db| {
             db.execute(
                 "INSERT INTO jobs (kind, url, dir, name, filename, state, connections,
-                                   referrer, user_agent, cookies, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?7, ?8, ?9, ?10)",
+                                   referrer, user_agent, cookies, created_at,
+                                   video_format, audio_only)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     job.kind.as_str(),
                     job.url.as_str(),
@@ -342,6 +372,8 @@ impl Manager {
                     job.context.user_agent,
                     job.context.cookies.as_ref().map(Secret::expose),
                     now(),
+                    job.video.as_ref().map(|video| video.format.as_str()),
+                    job.video.as_ref().map(|video| video.audio_only),
                 ],
             )?;
             Ok(db.last_insert_rowid())
@@ -500,6 +532,7 @@ impl Manager {
             connections: job.wanted_connections,
             filename: job.filename.clone(),
             context: job.context.clone(),
+            video: job.video.clone(),
         };
         let engine_id = match job.view.kind {
             Kind::File => match &self.files {

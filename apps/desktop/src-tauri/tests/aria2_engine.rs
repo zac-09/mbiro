@@ -70,6 +70,7 @@ async fn downloads_a_file_in_segments_and_reports_progress() {
         connections: 8,
         filename: None,
         context: BrowserContext::default(),
+        video: None,
     };
     let id = engine.add(request).await.expect("add");
     let seen = wait_for(&engine, &id, "completion", |s| s.state == JobState::Done).await;
@@ -125,6 +126,7 @@ async fn pauses_resumes_and_finishes_intact() {
         connections: 4,
         filename: None,
         context: BrowserContext::default(),
+        video: None,
     };
     let id = engine.add(request).await.expect("add");
     wait_for(&engine, &id, "first bytes", |s| s.completed_bytes > 0).await;
@@ -201,6 +203,7 @@ async fn sends_the_browser_context_and_saves_under_the_given_name() {
             user_agent: Some("TestBrowser/1.0".into()),
             cookies: Some(Secret::new("session=abc123; theme=dark")),
         },
+        video: None,
     };
     let id = engine.add(request).await.expect("add");
     let seen = wait_for(&engine, &id, "completion", |s| s.state == JobState::Done).await;

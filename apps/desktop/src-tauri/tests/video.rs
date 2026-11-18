@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use mbiro_desktop::engine::ytdlp::{ToolPaths, YtDlpEngine};
 use mbiro_desktop::engine::{AddRequest, BrowserContext, Engine, JobState};
 use mbiro_desktop::tools::{ALL, DENO, FFMPEG, YT_DLP};
+use mbiro_desktop::video::{self, Quality};
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("mbiro-video-{}-{name}", std::process::id()));
@@ -93,6 +94,7 @@ async fn fetches_the_tools_then_downloads_and_merges_a_clip() {
         connections: 1,
         filename: None,
         context: BrowserContext::default(),
+        video: None,
     };
     let id = engine.add(request).await.expect("add");
 
@@ -126,6 +128,58 @@ async fn fetches_the_tools_then_downloads_and_merges_a_clip() {
     assert!(info.contains("Audio: aac"), "{info}");
 
     engine.remove(&id).await.expect("remove");
+
+    // The look-up the add dialog does, and a download of the sound alone.
+    let page = format!("http://{addr}/clip.mpd").parse().unwrap();
+    let info = video::probe(&paths, &page).await.expect("probe");
+    assert_eq!(info.title, "clip");
+    assert_eq!(info.presets[0].quality, Quality::Best);
+    assert_eq!(info.presets[0].height, Some(240));
+    assert!(info
+        .presets
+        .iter()
+        .any(|preset| preset.quality == Quality::Audio));
+    assert!(
+        info.formats.iter().any(|row| row.has_video)
+            && info.formats.iter().any(|row| !row.has_video)
+    );
+
+    let sound = scratch("sound");
+    let request = AddRequest {
+        url: page,
+        dir: sound.clone(),
+        connections: 1,
+        filename: None,
+        context: BrowserContext::default(),
+        video: Quality::Audio.options(),
+    };
+    let id = engine.add(request).await.expect("add audio");
+    loop {
+        let status = engine.status(&id).await.expect("status");
+        assert_ne!(status.state, JobState::Failed, "failed: {:?}", status.error);
+        if status.state == JobState::Done {
+            break;
+        }
+        assert!(Instant::now() < deadline, "timed out");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let saved: Vec<_> = std::fs::read_dir(&sound)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    let probe = Command::new(&paths.ffmpeg)
+        .args(["-hide_banner", "-i"])
+        .arg(&saved[0])
+        .output()
+        .unwrap();
+    let info = String::from_utf8_lossy(&probe.stderr);
+    assert!(
+        info.contains("Audio: aac") && !info.contains("Video:"),
+        "{info}"
+    );
+    let _ = std::fs::remove_dir_all(&sound);
     let _ = std::fs::remove_dir_all(&media);
     let _ = std::fs::remove_dir_all(&out);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clock, filledBlocks, formatSize, percent, speedMb, timeLeft } from "./format";
+import { clock, duration, filledBlocks, formatSize, percent, speedMb, timeLeft } from "./format";
 
 const MB = 1024 * 1024;
 
@@ -57,5 +57,13 @@ describe("filledBlocks", () => {
     expect(filledBlocks(11, 32)).toBe(4);
     expect(filledBlocks(62, 28)).toBe(17);
     expect(filledBlocks(100, 32)).toBe(32);
+  });
+});
+
+describe("duration", () => {
+  it("reads like a clock", () => {
+    expect(duration(6)).toBe("00:06");
+    expect(duration(2538)).toBe("42:18");
+    expect(duration(3735)).toBe("1:02:15");
   });
 });

@@ -28,6 +28,8 @@ tokio = { version = "1.54.1", features = ["process", "net", "time", "sync", "mac
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "native-tls"] }
 # Checks every fetched tool against its pinned checksum before it is unpacked.
 sha2 = "0.11.1"
+# Hands a video page's picture to the window as a data URL.
+base64 = "0.22"
 url = "2"
 # The job list. SQLite is compiled in, so its version is the one pinned here.
 rusqlite = { version = "0.43.0", features = ["bundled"] }
