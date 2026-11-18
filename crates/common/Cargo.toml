@@ -1,0 +1,6 @@
+[package]
+name = "mbiro-common"
+description = "Names and the wire framing shared by the app and the native messaging host. No dependencies."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true

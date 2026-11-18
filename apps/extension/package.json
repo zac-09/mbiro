@@ -1,0 +1,20 @@
+{
+  "name": "@mbiro/extension",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "wxt build -b chrome && wxt build -b firefox --mv3",
+    "build:chrome": "wxt build -b chrome",
+    "build:firefox": "wxt build -b firefox --mv3",
+    "typecheck": "wxt prepare && tsc --noEmit -p tsconfig.json",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "@mbiro/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "wxt": "0.21.5"
+  }
+}

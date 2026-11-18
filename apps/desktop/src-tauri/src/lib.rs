@@ -1,8 +1,10 @@
 //! The Rust core. It owns the engine process and the list of jobs; the window
 //! only sends commands and renders the events sent from here.
 
+mod browsers;
 mod constants;
 pub mod engine;
+mod ipc;
 mod strings;
 
 use std::path::PathBuf;
@@ -53,28 +55,100 @@ fn list_downloads(state: State<'_, AppState>) -> Vec<JobStatus> {
     state.snapshot.lock().expect("snapshot lock").clone()
 }
 
-#[tauri::command]
-async fn add_download(state: State<'_, AppState>, url: String) -> Result<String, String> {
-    let url = Url::parse(url.trim()).map_err(|_| strings::URL_INVALID.to_owned())?;
+/// Why a download could not be started.
+enum AddError {
+    InvalidUrl,
+    UnsupportedScheme,
+    NoDownloadFolder,
+    EngineDown,
+    Engine(String),
+}
+
+impl AddError {
+    /// What the window shows.
+    fn message(self) -> String {
+        match self {
+            Self::InvalidUrl => strings::URL_INVALID.to_owned(),
+            Self::UnsupportedScheme => strings::URL_SCHEME_UNSUPPORTED.to_owned(),
+            Self::NoDownloadFolder => strings::DOWNLOAD_FOLDER_MISSING.to_owned(),
+            Self::EngineDown => strings::ENGINE_NOT_RUNNING.to_owned(),
+            Self::Engine(reason) => reason,
+        }
+    }
+
+    /// What the extension is told.
+    fn code(&self) -> ipc::RefusalCode {
+        match self {
+            Self::InvalidUrl | Self::UnsupportedScheme => ipc::RefusalCode::UnsupportedUrl,
+            Self::NoDownloadFolder | Self::EngineDown => ipc::RefusalCode::EngineUnavailable,
+            Self::Engine(_) => ipc::RefusalCode::Rejected,
+        }
+    }
+}
+
+/// The one way a download starts, whether asked for by the window or a browser.
+async fn start_download(state: &AppState, url: &str) -> Result<String, AddError> {
+    let url = Url::parse(url.trim()).map_err(|_| AddError::InvalidUrl)?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(strings::URL_SCHEME_UNSUPPORTED.to_owned());
+        return Err(AddError::UnsupportedScheme);
     }
     let dir = state
         .download_dir
         .clone()
-        .ok_or_else(|| strings::DOWNLOAD_FOLDER_MISSING.to_owned())?;
+        .ok_or(AddError::NoDownloadFolder)?;
+    let engine = state.engine.as_ref().ok_or(AddError::EngineDown)?;
     let request = AddRequest {
         url,
         dir,
         connections: DEFAULT_CONNECTIONS,
     };
-    let id = state
-        .engine()?
+    let id = engine
         .add(request)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AddError::Engine(e.to_string()))?;
     state.jobs.lock().expect("jobs lock").push(id.clone());
     Ok(id)
+}
+
+#[tauri::command]
+async fn add_download(state: State<'_, AppState>, url: String) -> Result<String, String> {
+    start_download(&state, &url)
+        .await
+        .map_err(AddError::message)
+}
+
+/// Answers the native messaging host for the life of the app.
+async fn serve_browsers(app: AppHandle, listener: tokio::net::UnixListener) {
+    ipc::serve(listener, move |request| {
+        let app = app.clone();
+        async move {
+            let ipc::Request::Download { url, .. } = request;
+            match start_download(&app.state::<AppState>(), &url).await {
+                Ok(id) => ipc::Ack::accepted(id),
+                Err(error) => ipc::Ack::refused(error.code()),
+            }
+        }
+    })
+    .await;
+}
+
+/// Opens the socket and points the browsers at the host. Browser capture is
+/// optional: if any of this fails, the app still works by paste.
+fn start_browser_integration(app: &AppHandle) {
+    let Ok(home) = app.path().home_dir() else {
+        return;
+    };
+    if let Ok(host) = sidecar_path(constants::NM_HOST_BINARY) {
+        let _ = browsers::install_manifests(&home, &host);
+    }
+    let socket = mbiro_common::socket_path(&home);
+    // Binding needs the runtime, so it happens inside the task.
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Ok(listener) = ipc::bind(&socket) {
+            serve_browsers(app, listener).await;
+        }
+    });
 }
 
 #[tauri::command]
@@ -122,12 +196,12 @@ async fn poll_jobs(app: AppHandle, engine: Arc<Aria2Engine>) {
 }
 
 /// Tauri places a sidecar next to the main executable, in dev and in the bundle.
-fn sidecar_path() -> std::io::Result<PathBuf> {
+fn sidecar_path(name: &str) -> std::io::Result<PathBuf> {
     let exe = std::env::current_exe()?;
     let dir = exe
         .parent()
         .ok_or_else(|| std::io::Error::other("executable has no folder"))?;
-    Ok(dir.join(constants::ARIA2_BINARY))
+    Ok(dir.join(name))
 }
 
 pub fn run() {
@@ -135,7 +209,7 @@ pub fn run() {
         .setup(|app| {
             let run_dir = app.path().app_data_dir()?.join("run");
             let started = tauri::async_runtime::block_on(async {
-                let binary = sidecar_path().map_err(|e| e.to_string())?;
+                let binary = sidecar_path(constants::ARIA2_BINARY).map_err(|e| e.to_string())?;
                 Aria2Engine::start(&binary, &run_dir)
                     .await
                     .map_err(|e| e.to_string())
@@ -158,6 +232,7 @@ pub fn run() {
                 snapshot: Mutex::new(Vec::new()),
             });
 
+            start_browser_integration(app.handle());
             if let Some(engine) = engine {
                 tauri::async_runtime::spawn(poll_jobs(app.handle().clone(), engine));
             }

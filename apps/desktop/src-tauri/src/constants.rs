@@ -1,17 +1,11 @@
-//! The one Rust home for names that may still change.
-//!
-//! All four are placeholders until the owner confirms them (PLAN.md section 14).
-//! The TypeScript twin is `packages/protocol/src/constants.ts`. The product name
-//! and identifier also appear in `tauri.conf.json`, which Tauri reads at build time.
-#![allow(dead_code)]
+//! Names used by the desktop core. The ones that may still change live in
+//! `mbiro-common`, shared with the native messaging host.
 
-pub const PRODUCT_NAME: &str = "Mbiro";
-pub const BUNDLE_IDENTIFIER: &str = "dev.mbiro.app";
-pub const NATIVE_HOST_NAME: &str = "dev.mbiro.host";
-pub const URL_SCHEME: &str = "mbiro";
+pub use mbiro_common::constants::*;
 
-/// File name of the bundled aria2 sidecar, next to the main executable.
+/// File names of the bundled helpers, next to the main executable.
 pub const ARIA2_BINARY: &str = "aria2c";
+pub const NM_HOST_BINARY: &str = "nm-host";
 
 /// Event carrying the full list of jobs, sent once a second.
 pub const SNAPSHOT_EVENT: &str = "downloads:snapshot";

@@ -6,7 +6,15 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/", "**/target/", ".cache/", "design/", "apps/desktop/src-tauri/"],
+    ignores: [
+      "**/dist/",
+      "**/target/",
+      "**/.output/",
+      "**/.wxt/",
+      ".cache/",
+      "design/",
+      "apps/desktop/src-tauri/",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strict,

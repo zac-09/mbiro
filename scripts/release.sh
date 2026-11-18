@@ -48,6 +48,7 @@ xcrun --find stapler >/dev/null 2>&1 || die "stapler was not found (install Xcod
 
 SIDECAR="${ROOT}/apps/desktop/src-tauri/binaries/aria2c-${TARGET}"
 [[ -x "${SIDECAR}" ]] || die "aria2c is missing: run scripts/build-aria2.sh first"
+"${ROOT}/scripts/build-nm-host.sh"
 
 if [[ "${SIGNING_IDENTITY}" != "-" ]]; then
   security find-identity -v -p codesigning | grep -qF "${SIGNING_IDENTITY}" \

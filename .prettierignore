@@ -10,3 +10,5 @@ AGENTS.md
 PLAN.md
 DESIGN.md
 FIRST-PROMPT.md
+.output/
+.wxt/

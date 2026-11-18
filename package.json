@@ -8,9 +8,11 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "dev": "pnpm --filter @mbiro/desktop tauri dev",
-    "build": "pnpm --filter @mbiro/desktop tauri build",
+    "dev": "./scripts/build-nm-host.sh && pnpm --filter @mbiro/desktop tauri dev",
+    "build": "./scripts/build-nm-host.sh && pnpm --filter @mbiro/desktop tauri build",
     "build:aria2": "./scripts/build-aria2.sh",
+    "build:nm-host": "./scripts/build-nm-host.sh",
+    "build:extension": "pnpm --filter @mbiro/extension build",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "typecheck": "pnpm -r typecheck",

@@ -1835,9 +1835,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mbiro-common"
+version = "0.0.0"
+
+[[package]]
 name = "mbiro-desktop"
 version = "0.0.0"
 dependencies = [
+ "mbiro-common",
  "reqwest",
  "serde",
  "serde_json",
@@ -1850,6 +1855,9 @@ dependencies = [
 [[package]]
 name = "mbiro-nm-host"
 version = "0.0.0"
+dependencies = [
+ "mbiro-common",
+]
 
 [[package]]
 name = "memchr"
