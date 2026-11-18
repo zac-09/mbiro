@@ -6,6 +6,7 @@ mod constants;
 pub mod engine;
 mod ipc;
 pub mod jobs;
+mod shell;
 mod strings;
 pub mod tools;
 
@@ -15,7 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager as _, RunEvent, State};
+use tauri::{AppHandle, Emitter, Manager as _, RunEvent, State, WindowEvent};
+use tauri_plugin_notification::NotificationExt;
 use url::Url;
 
 use engine::aria2::Aria2Engine;
@@ -263,6 +265,11 @@ fn resume_all(state: State<'_, AppState>) -> Result<(), String> {
     state.manager.resume_all()
 }
 
+#[tauri::command]
+fn open_main_window(app: AppHandle) {
+    shell::show_main_window(&app);
+}
+
 /// Shows a finished download in the Finder.
 #[tauri::command]
 fn show_file(state: State<'_, AppState>, id: i64) -> Result<(), String> {
@@ -397,10 +404,17 @@ async fn run_queue(app: AppHandle) {
         let state = app.state::<AppState>();
         if let Ok(finished) = state.manager.tick().await {
             for job in finished {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(strings::NOTIFY_FINISHED)
+                    .body(&job.name)
+                    .show();
                 let _ = app.emit(constants::FINISHED_EVENT, job);
             }
         }
         if let Ok(snapshot) = state.manager.snapshot() {
+            shell::set_menu_bar_speed(&app, snapshot.iter().map(|job| job.speed_bps).sum());
             let _ = app.emit(constants::SNAPSHOT_EVENT, snapshot);
         }
     }
@@ -417,7 +431,12 @@ fn sidecar_path(name: &str) -> std::io::Result<PathBuf> {
 
 pub fn run() {
     let app = tauri::Builder::default()
+        // Must be the first plugin: it decides whether this launch goes on at all.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            shell::show_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let started = tauri::async_runtime::block_on(async {
@@ -450,6 +469,7 @@ pub fn run() {
                 fetching_tools: AtomicBool::new(false),
             });
 
+            shell::setup(app)?;
             start_browser_integration(app.handle());
             tauri::async_runtime::spawn(run_queue(app.handle().clone()));
             Ok(())
@@ -467,20 +487,36 @@ pub fn run() {
             pause_all,
             resume_all,
             show_file,
+            open_main_window,
             tools_status,
             fetch_tools,
         ])
         .build(tauri::generate_context!())
         .expect("the app could not be built");
 
-    app.run(|app, event| {
-        if let RunEvent::Exit = event {
+    app.run(|app, event| match event {
+        // Closing the main window hides it: downloads carry on, and the menu
+        // bar item or the Dock brings the window back.
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } if label == constants::MAIN_WINDOW => {
+            api.prevent_close();
+            if let Some(window) = app.get_webview_window(constants::MAIN_WINDOW) {
+                let _ = window.hide();
+            }
+        }
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => shell::show_main_window(app),
+        RunEvent::Exit => {
             // aria2 saves its control files on the way out, so partial
             // downloads resume after the next launch.
             if let Some(engine) = app.state::<AppState>().manager.file_engine().cloned() {
                 tauri::async_runtime::block_on(engine.shutdown());
             }
         }
+        _ => {}
     });
 }
 

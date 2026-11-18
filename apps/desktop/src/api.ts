@@ -60,6 +60,7 @@ export const api = {
   pauseAll: () => invoke<null>("pause_all"),
   resumeAll: () => invoke<null>("resume_all"),
   showFile: (id: number) => invoke<null>("show_file", { id }),
+  openMainWindow: () => invoke<null>("open_main_window"),
   toolsStatus: () => invoke<ToolStatus[]>("tools_status"),
   fetchTools: () => invoke<null>("fetch_tools"),
 };

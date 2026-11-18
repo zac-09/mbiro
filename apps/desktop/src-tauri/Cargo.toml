@@ -13,7 +13,11 @@ tauri-build = { version = "=2.7.6", features = [] }
 
 [dependencies]
 mbiro-common = { path = "../../../crates/common" }
-tauri = { version = "=2.12.7", features = [] }
+tauri = { version = "=2.12.7", features = ["tray-icon", "image-png"] }
+# Tells the user when a download finishes.
+tauri-plugin-notification = "=2.8.1"
+# A second launch brings the running app forward instead of starting another.
+tauri-plugin-single-instance = "=2.5.5"
 # The folder picker in the add dialog.
 tauri-plugin-dialog = "=2.8.4"
 serde = { version = "1.0.229", features = ["derive"] }

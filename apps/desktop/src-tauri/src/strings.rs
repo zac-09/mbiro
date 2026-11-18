@@ -14,3 +14,4 @@ pub const TOOL_CHECKSUM_FAILED: &str =
     "A downloaded tool did not match its checksum and was discarded. Try again later.";
 pub const FILE_MISSING: &str = "The file is no longer where it was saved.";
 pub const FOLDER_MISSING: &str = "That folder does not exist. Choose another.";
+pub const NOTIFY_FINISHED: &str = "Download finished";

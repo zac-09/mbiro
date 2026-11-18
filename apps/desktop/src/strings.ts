@@ -45,6 +45,19 @@ export const strings = {
     },
   },
 
+  menuBar: {
+    openWindow: "OPEN WINDOW",
+    summary: (active: number, paused: number, failed: number, more: number) => {
+      const parts = [
+        more > 0 ? `${more} MORE` : null,
+        paused > 0 ? `${paused} PAUSED` : null,
+        failed > 0 ? `${failed} FAILED` : null,
+      ].filter(Boolean);
+      if (parts.length > 0) return parts.join(" · ");
+      return active > 0 ? "" : "NOTHING DOWNLOADING";
+    },
+  },
+
   add: {
     heading: "ADD DOWNLOAD",
     link: "LINK",
