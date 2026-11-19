@@ -124,6 +124,12 @@ export interface BrowserStatus {
   connected: boolean;
 }
 
+/** Mirrors `Status` in src-tauri/src/licence.rs. */
+export type LicenceStatus =
+  | { state: "licensed"; email: string; plan: string }
+  | { state: "trial"; daysLeft: number }
+  | { state: "expired" };
+
 export interface AddDefaults {
   dir: string;
   connections: number;
@@ -142,6 +148,9 @@ export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   setSettings: (settings: Settings) => invoke<Settings>("set_settings", { settings }),
   browserStatus: () => invoke<BrowserStatus[]>("browser_status"),
+  licenceStatus: () => invoke<LicenceStatus>("licence_status"),
+  enterLicence: (key: string) => invoke<LicenceStatus>("enter_licence", { key }),
+  removeLicence: () => invoke<LicenceStatus>("remove_licence"),
   addDefaults: () => invoke<AddDefaults>("add_defaults"),
   add: (url: string, dir: string | null, connections: number) =>
     invoke<number>("add_download", { url, dir, connections }),

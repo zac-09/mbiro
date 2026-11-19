@@ -378,3 +378,48 @@ async fn settings_choose_the_folder_cap_the_speed_and_survive_a_relaunch() {
     engine.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn after_the_trial_one_download_runs_at_a_time_on_two_connections() {
+    let server = TestServer::start(6 * MB, Duration::from_millis(5)).await;
+    let dir = scratch("restricted");
+    let engine = engine(&dir).await;
+    let manager = manager(&dir, engine.clone(), 3);
+    manager.set_restricted(true);
+
+    manager.add(file(server.url("one.bin"), 8)).unwrap();
+    manager.add(file(server.url("two.bin"), 8)).unwrap();
+    let seen = run_until(&manager, "both to finish", all_done).await;
+
+    for snapshot in &seen {
+        let running = snapshot
+            .iter()
+            .filter(|job| job.state == JobState::Active)
+            .count();
+        assert!(running <= 1, "two downloads ran at once after the trial");
+        assert!(
+            snapshot.iter().all(|job| job.connections <= 2),
+            "more than two connections"
+        );
+    }
+    assert!(
+        server.peak_connections() <= 2,
+        "the server saw {} connections",
+        server.peak_connections()
+    );
+    for job in seen.last().unwrap() {
+        assert!(std::fs::read(job.path()).unwrap() == *server.body);
+    }
+
+    // A licence lifts the limits for whatever starts next.
+    manager.set_restricted(false);
+    manager.add(file(server.url("three.bin"), 8)).unwrap();
+    let seen = run_until(&manager, "the third to finish", all_done).await;
+    assert!(
+        seen.iter().flatten().any(|job| job.connections > 2),
+        "the limit was not lifted"
+    );
+
+    engine.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

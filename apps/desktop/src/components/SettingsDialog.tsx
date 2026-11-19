@@ -6,6 +6,7 @@ import {
   api,
   type BrowserStatus,
   type Category,
+  type LicenceStatus,
   type Settings,
   type ToolProgress,
   type ToolStatus,
@@ -151,12 +152,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [fetching, setFetching] = useState<ToolProgress | "starting" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [licence, setLicence] = useState<LicenceStatus | null>(null);
 
   useEffect(() => {
     dialog.current?.showModal();
     void api.getSettings().then(setSettings);
     void api.addDefaults().then((defaults) => setDownloads(defaults.dir));
     void api.browserStatus().then(setBrowsers);
+    void api.licenceStatus().then(setLicence);
     void api.toolsStatus().then(setTools);
     const unlisten = listen<ToolProgress>(TOOL_PROGRESS_EVENT, (event) =>
       setFetching(event.payload),
@@ -420,6 +423,46 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </button>
           )}
         </Section>
+
+        {licence && (
+          <Section title={strings.licence.section}>
+            <Row
+              name={strings.licence.statusName}
+              help={
+                licence.state === "expired"
+                  ? strings.licence.expiredHelp
+                  : licence.state === "trial"
+                    ? strings.licence.trialHelp
+                    : licence.plan.toUpperCase()
+              }
+            >
+              <Status
+                good={licence.state !== "expired"}
+                label={
+                  licence.state === "licensed"
+                    ? strings.licence.licensed(licence.email)
+                    : licence.state === "trial"
+                      ? strings.licence.trial(licence.daysLeft)
+                      : strings.licence.expired
+                }
+              />
+              {licence.state === "licensed" && (
+                <button
+                  type="button"
+                  className={secondaryButton}
+                  onClick={() =>
+                    void api
+                      .removeLicence()
+                      .then(setLicence)
+                      .catch((reason: unknown) => setError(String(reason)))
+                  }
+                >
+                  {strings.licence.remove}
+                </button>
+              )}
+            </Row>
+          </Section>
+        )}
 
         <div className="flex justify-end border-t border-rule-strong pt-4">
           <button type="button" className={`${primaryButton} px-7`} onClick={onClose}>

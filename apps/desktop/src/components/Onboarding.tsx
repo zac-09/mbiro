@@ -1,12 +1,11 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
-import { api, type BrowserStatus, type Settings } from "../api";
+import { api, type BrowserStatus, type LicenceStatus, type Settings } from "../api";
 import { strings } from "../strings";
 import { fieldLabel, primaryButton, secondaryButton } from "../ui";
 
 const t = strings.onboarding;
-/** The trial step joins these two when licensing is built. */
-const STEPS = 2;
+const STEPS = 3;
 
 /** Shows a folder under the home folder as `~/…`. */
 const tilde = (path: string) => path.replace(/^\/Users\/[^/]+/, "~");
@@ -17,16 +16,18 @@ interface Props {
   onDone: (settings: Settings) => void;
 }
 
-/** The first-launch steps: where to save, and the browser extension. */
+/** The first-launch steps: where to save, the browser extension, and the trial. */
 export function Onboarding({ settings, onDone }: Props) {
   const [step, setStep] = useState(1);
   const [dir, setDir] = useState<string | null>(settings.defaultDir);
   const [fallback, setFallback] = useState("");
   const [browsers, setBrowsers] = useState<BrowserStatus[]>([]);
+  const [licence, setLicence] = useState<LicenceStatus | null>(null);
 
   useEffect(() => {
     void api.addDefaults().then((defaults) => setFallback(defaults.dir));
     void api.browserStatus().then(setBrowsers);
+    void api.licenceStatus().then(setLicence);
   }, []);
 
   const choose = async () => {
@@ -36,6 +37,14 @@ export function Onboarding({ settings, onDone }: Props) {
 
   const here = browsers.filter((browser) => browser.installed);
   const last = step === STEPS;
+  const trialHeading =
+    licence?.state === "licensed"
+      ? t.licensedHeading
+      : licence?.state === "expired"
+        ? t.trialEnded
+        : t.trialHeading(licence?.daysLeft ?? 14);
+  const heading = step === 1 ? t.folderHeading : step === 2 ? t.browserHeading : trialHeading;
+  const body = step === 1 ? t.folderBody : step === 2 ? t.browserBody : t.trialBody;
 
   return (
     <main className="box-border flex min-h-screen flex-col gap-6 px-9 pt-[22px] pb-6">
@@ -51,11 +60,9 @@ export function Onboarding({ settings, onDone }: Props) {
           key={step}
           className="animate-drop m-0 font-display text-[46px] leading-[0.92] font-bold tracking-[0.02em]"
         >
-          {step === 1 ? t.folderHeading : t.browserHeading}
+          {heading}
         </h1>
-        <p className="m-0 text-[12.5px] leading-[1.55] text-soft">
-          {step === 1 ? t.folderBody : t.browserBody}
-        </p>
+        <p className="m-0 text-[12.5px] leading-[1.55] text-soft">{body}</p>
 
         {step === 1 ? (
           <div className="flex items-center gap-3 border-y border-rule-strong py-[14px]">
@@ -67,7 +74,7 @@ export function Onboarding({ settings, onDone }: Props) {
               {t.change}
             </button>
           </div>
-        ) : (
+        ) : step === 2 ? (
           <div className="flex flex-col border-t border-rule-strong pt-3">
             <span className={fieldLabel}>{t.browsersLabel}</span>
             {here.length === 0 ? (
@@ -94,7 +101,7 @@ export function Onboarding({ settings, onDone }: Props) {
               ))
             )}
           </div>
-        )}
+        ) : null}
       </div>
 
       <footer className="mt-auto flex justify-end gap-[10px] border-t border-rule-strong pt-4">

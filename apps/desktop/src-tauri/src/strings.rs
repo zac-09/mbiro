@@ -40,3 +40,8 @@ pub const VIDEO_FAIL_PROTECTED: &str =
 pub const VIDEO_FAIL_SIGN_IN: &str = "This video needs a sign-in. That is not supported yet.";
 pub const VIDEO_FAIL_UNAVAILABLE: &str = "This video is not available. Check the link.";
 pub const VIDEO_FAIL_OTHER: &str = "The video could not be downloaded. Retry, or check the link.";
+
+pub const LICENCE_UNAVAILABLE: &str = "Licence keys cannot be checked in this build yet.";
+pub const LICENCE_INVALID: &str =
+    "That key is not valid. Copy all of it again from your licence email.";
+pub const TRIAL_ENDED_VIDEO: &str = "The trial has ended. Video downloads need a licence.";

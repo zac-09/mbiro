@@ -158,6 +158,8 @@ pub struct Manager {
     /// The Mac's Downloads folder, used when Settings names no other.
     system_dir: PathBuf,
     settings: RwLock<Settings>,
+    /// True once the trial is over with no licence: the limits in `licence` apply.
+    restricted: std::sync::atomic::AtomicBool,
     retry_delay: Duration,
 }
 
@@ -290,10 +292,44 @@ impl Manager {
             videos: Mutex::new(videos),
             live: Mutex::default(),
             retries: Mutex::default(),
+            restricted: std::sync::atomic::AtomicBool::new(false),
             system_dir: config.default_dir,
             settings: RwLock::new(settings),
             retry_delay: config.retry_delay,
         })
+    }
+
+    pub fn restricted(&self) -> bool {
+        self.restricted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Switches the after-trial limits on or off. Downloads already running carry on.
+    pub fn set_restricted(&self, restricted: bool) {
+        self.restricted
+            .store(restricted, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// A small value kept beside the job list, such as when the trial began.
+    pub fn stored(&self, key: &str) -> DbResult<Option<String>> {
+        self.with_db(|db| {
+            db.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()
+        })
+    }
+
+    /// Keeps a small value, or forgets it when given `None`.
+    pub fn store(&self, key: &str, value: Option<&str>) -> DbResult<()> {
+        self.with_db(|db| match value {
+            Some(value) => db.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [key, value],
+            ),
+            None => db.execute("DELETE FROM settings WHERE key = ?1", [key]),
+        })
+        .map(drop)
     }
 
     /// Where a download goes when nothing more specific applies.
@@ -642,7 +678,12 @@ impl Manager {
         let request = AddRequest {
             url,
             dir: job.view.dir.clone(),
-            connections: job.wanted_connections,
+            connections: if self.restricted() {
+                job.wanted_connections
+                    .min(crate::licence::RESTRICTED_CONNECTIONS)
+            } else {
+                job.wanted_connections
+            },
             filename: job.filename.clone(),
             context: job.context.clone(),
             video: job.video.clone(),
@@ -807,7 +848,11 @@ impl Manager {
 
     async fn fill_slots(&self) -> DbResult<()> {
         let jobs = self.load_all()?;
-        let max_concurrent = self.settings.read().expect("settings lock").max_concurrent;
+        let max_concurrent = if self.restricted() {
+            crate::licence::RESTRICTED_MAX_CONCURRENT
+        } else {
+            self.settings.read().expect("settings lock").max_concurrent
+        };
         let mut running = jobs
             .iter()
             .filter(|job| job.view.state == JobState::Active)

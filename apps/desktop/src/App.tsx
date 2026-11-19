@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { OPEN_ADD_EVENT, api, type Job, type Settings } from "./api";
+import { OPEN_ADD_EVENT, api, type Job, type LicenceStatus, type Settings } from "./api";
 import { AddDialog } from "./components/AddDialog";
 import { DownloadRow, primaryAction } from "./components/DownloadRow";
+import { LicenceDialog } from "./components/LicenceDialog";
 import { Onboarding } from "./components/Onboarding";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { speedMb } from "./format";
@@ -52,6 +53,19 @@ function Downloads() {
   /** The add dialog is open when this is a string: the link to start with. */
   const [adding, setAdding] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [licenceOpen, setLicenceOpen] = useState(false);
+  const [licence, setLicence] = useState<LicenceStatus | null>(null);
+
+  // The trial can run out while the window is open; ask again every minute.
+  useEffect(() => {
+    const ask = () => void api.licenceStatus().then(setLicence);
+    const first = setTimeout(ask, 0);
+    const timer = setInterval(ask, 60_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, [settingsOpen]);
 
   useEffect(connect, []);
 
@@ -253,14 +267,31 @@ function Downloads() {
         </ul>
       )}
 
-      <footer className="mt-auto flex flex-wrap items-center justify-end gap-[10px] border-t border-rule-strong pt-3">
-        <button type="button" className={secondaryButton} onClick={() => setSettingsOpen(true)}>
-          {strings.openSettings}
-        </button>
+      <footer className="mt-auto flex flex-wrap items-center justify-between gap-[10px] border-t border-rule-strong pt-3">
+        <span
+          className={`text-[12px] tracking-[0.08em] ${licence?.state === "expired" ? "text-danger-ink" : "text-muted"}`}
+        >
+          {licence?.state === "trial" && strings.licence.trial(licence.daysLeft)}
+          {licence?.state === "expired" && strings.licence.expired}
+          {licence?.state === "licensed" && strings.licence.licensed(licence.email)}
+        </span>
+        <div className="flex flex-wrap gap-[10px]">
+          {licence && licence.state !== "licensed" && (
+            <button type="button" className={secondaryButton} onClick={() => setLicenceOpen(true)}>
+              {strings.licence.enter}
+            </button>
+          )}
+          <button type="button" className={secondaryButton} onClick={() => setSettingsOpen(true)}>
+            {strings.openSettings}
+          </button>
+        </div>
       </footer>
 
       {adding !== null && <AddDialog initialUrl={adding} onClose={() => setAdding(null)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {licenceOpen && (
+        <LicenceDialog onClose={() => setLicenceOpen(false)} onActivated={setLicence} />
+      )}
     </div>
   );
 }

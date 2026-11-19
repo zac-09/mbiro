@@ -91,6 +91,24 @@ export const strings = {
     nightlyHelp: "Newer and less tested. Turn this on if a site has stopped working.",
   },
 
+  licence: {
+    trial: (days: number) => `TRIAL · ${days} ${days === 1 ? "DAY" : "DAYS"} LEFT`,
+    expired: "TRIAL ENDED · ONE DOWNLOAD AT A TIME",
+    licensed: (email: string) => `LICENSED TO ${email.toUpperCase()}`,
+    enter: "ENTER LICENCE KEY",
+    heading: "ENTER LICENCE KEY",
+    body: "Paste the key from your licence email. It is checked on this Mac; nothing is sent anywhere.",
+    keyLabel: "LICENCE KEY",
+    activate: "ACTIVATE",
+    cancel: "CANCEL",
+    section: "LICENCE",
+    statusName: "STATUS",
+    expiredHelp:
+      "Without a licence: one download at a time, two connections each, and no video downloads.",
+    trialHelp: "Everything is switched on during the trial.",
+    remove: "REMOVE LICENCE",
+  },
+
   onboarding: {
     step: (current: number, total: number) => `STEP ${current} OF ${total}`,
     next: "NEXT",
@@ -107,6 +125,10 @@ export const strings = {
     noBrowsers: "No supported browser was found. Chrome, Edge, Brave and Firefox are supported.",
     ready: "READY FOR THE EXTENSION",
     notConnected: "NOT CONNECTED",
+    trialHeading: (days: number) => `YOUR ${days}-DAY TRIAL HAS STARTED`,
+    trialBody: `Everything is switched on while you try ${PRODUCT_NAME}. After the trial, without a licence, it keeps working with limits: one download at a time, two connections each, and no video downloads. You can enter a licence key at any time from the bottom of the window.`,
+    trialEnded: "THE TRIAL HAS ENDED",
+    licensedHeading: "YOU HAVE A LICENCE",
   },
 
   menuBar: {

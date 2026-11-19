@@ -7,6 +7,7 @@ mod constants;
 pub mod engine;
 mod ipc;
 pub mod jobs;
+pub mod licence;
 pub mod settings;
 mod shell;
 mod strings;
@@ -49,6 +50,8 @@ struct AppState {
     clipboard_seen: Mutex<isize>,
     /// A copied link waiting to be offered. In memory only.
     copied_link: Mutex<Option<String>>,
+    /// Trial or licence, as last worked out.
+    licence: Mutex<licence::Status>,
 }
 
 impl AppState {
@@ -87,6 +90,7 @@ enum AddError {
     InvalidContext,
     EngineDown,
     ToolsMissing,
+    NeedsLicence,
     BadFolder,
     Storage(String),
 }
@@ -100,6 +104,7 @@ impl AddError {
             Self::InvalidContext => strings::REQUEST_INVALID.to_owned(),
             Self::EngineDown => strings::ENGINE_NOT_RUNNING.to_owned(),
             Self::ToolsMissing => strings::TOOLS_MISSING.to_owned(),
+            Self::NeedsLicence => strings::TRIAL_ENDED_VIDEO.to_owned(),
             Self::BadFolder => strings::FOLDER_MISSING.to_owned(),
             Self::Storage(reason) => reason,
         }
@@ -110,7 +115,9 @@ impl AddError {
         match self {
             Self::InvalidUrl | Self::UnsupportedScheme => ipc::RefusalCode::UnsupportedUrl,
             Self::InvalidContext => ipc::RefusalCode::InvalidMessage,
-            Self::EngineDown | Self::ToolsMissing => ipc::RefusalCode::EngineUnavailable,
+            Self::EngineDown | Self::ToolsMissing | Self::NeedsLicence => {
+                ipc::RefusalCode::EngineUnavailable
+            }
             Self::BadFolder | Self::Storage(_) => ipc::RefusalCode::Rejected,
         }
     }
@@ -170,6 +177,7 @@ fn queue_download(state: &AppState, spec: DownloadSpec) -> Result<i64, AddError>
     }
     match spec.kind {
         Kind::File if state.manager.file_engine().is_none() => return Err(AddError::EngineDown),
+        Kind::Video if state.manager.restricted() => return Err(AddError::NeedsLicence),
         Kind::Video if !state.manager.has_video_engine() => return Err(AddError::ToolsMissing),
         _ => {}
     }
@@ -228,6 +236,9 @@ fn http_url(text: &str) -> Result<Url, String> {
 #[tauri::command]
 async fn probe_video(state: State<'_, AppState>, url: String) -> Result<video::Found, String> {
     let url = http_url(&url)?;
+    if state.manager.restricted() {
+        return Err(strings::TRIAL_ENDED_VIDEO.to_owned());
+    }
     let engine = state.manager.video_engine().ok_or(strings::TOOLS_MISSING)?;
     video::probe(&engine.tools(), &url).await
 }
@@ -321,6 +332,71 @@ fn browser_status(app: AppHandle) -> Vec<browsers::BrowserStatus> {
         .home_dir()
         .map(|home| browsers::status(&home))
         .unwrap_or_default()
+}
+
+const TRIAL_STARTED_KEY: &str = "trial_started";
+const LAST_SEEN_KEY: &str = "last_seen";
+const LICENCE_KEY: &str = "licence";
+
+/// Works out trial or licence afresh, remembers what needs remembering, and
+/// switches the after-trial limits to match.
+fn refresh_licence(state: &AppState) -> licence::Status {
+    let manager = &state.manager;
+    let number = |key| {
+        manager
+            .stored(key)
+            .ok()
+            .flatten()
+            .and_then(|text| text.parse::<i64>().ok())
+    };
+    let record = licence::Record {
+        trial_started: number(TRIAL_STARTED_KEY),
+        last_seen: number(LAST_SEEN_KEY),
+        key: manager.stored(LICENCE_KEY).ok().flatten(),
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let (status, next) = licence::evaluate(&record, now, licence::PUBLIC_KEY);
+    if next.trial_started != record.trial_started {
+        let _ = manager.store(
+            TRIAL_STARTED_KEY,
+            next.trial_started.map(|t| t.to_string()).as_deref(),
+        );
+    }
+    if next.last_seen != record.last_seen {
+        let _ = manager.store(
+            LAST_SEEN_KEY,
+            next.last_seen.map(|t| t.to_string()).as_deref(),
+        );
+    }
+    manager.set_restricted(status.restricted());
+    *state.licence.lock().expect("licence lock") = status.clone();
+    status
+}
+
+#[tauri::command]
+fn licence_status(state: State<'_, AppState>) -> licence::Status {
+    refresh_licence(&state)
+}
+
+/// Checks a pasted key and, if it is ours, keeps it.
+#[tauri::command]
+fn enter_licence(state: State<'_, AppState>, key: String) -> Result<licence::Status, String> {
+    let public = licence::PUBLIC_KEY.ok_or(strings::LICENCE_UNAVAILABLE)?;
+    licence::verify(&key, public).map_err(|error| match error {
+        licence::KeyError::NoPublicKey => strings::LICENCE_UNAVAILABLE.to_owned(),
+        _ => strings::LICENCE_INVALID.to_owned(),
+    })?;
+    let tidy: String = key.chars().filter(|c| !c.is_whitespace()).collect();
+    state.manager.store(LICENCE_KEY, Some(&tidy))?;
+    Ok(refresh_licence(&state))
+}
+
+#[tauri::command]
+fn remove_licence(state: State<'_, AppState>) -> Result<licence::Status, String> {
+    state.manager.store(LICENCE_KEY, None)?;
+    Ok(refresh_licence(&state))
 }
 
 /// What the add dialog starts from.
@@ -667,9 +743,15 @@ fn use_copied_link(app: AppHandle, state: State<'_, AppState>) {
 /// Runs for the life of the app, with or without a window.
 async fn run_queue(app: AppHandle) {
     let mut tick = tokio::time::interval(POLL_INTERVAL);
+    let mut turns = 0u64;
     loop {
         tick.tick().await;
         let state = app.state::<AppState>();
+        // The trial can run out while the app is open; look once a minute.
+        turns += 1;
+        if turns.is_multiple_of(60) {
+            refresh_licence(&state);
+        }
         if let Ok(finished) = state.manager.tick().await {
             let notify = state.manager.settings().notify_on_finish;
             for job in finished {
@@ -744,7 +826,12 @@ pub fn run() {
                 // What is already on the pasteboard at launch is not offered.
                 clipboard_seen: Mutex::new(clipboard::change_count()),
                 copied_link: Mutex::new(None),
+                licence: Mutex::new(licence::Status::Trial {
+                    days_left: licence::TRIAL_DAYS,
+                }),
             });
+            // The trial clock starts, or carries on, from the first launch.
+            refresh_licence(&app.state::<AppState>());
 
             shell::setup(app)?;
             start_browser_integration(app.handle());
@@ -760,6 +847,9 @@ pub fn run() {
             engine_health,
             list_downloads,
             add_defaults,
+            licence_status,
+            enter_licence,
+            remove_licence,
             get_settings,
             set_settings,
             browser_status,
