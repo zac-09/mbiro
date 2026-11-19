@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { OPEN_ADD_EVENT, api, type Job } from "./api";
+import { OPEN_ADD_EVENT, api, type Job, type Settings } from "./api";
 import { AddDialog } from "./components/AddDialog";
 import { DownloadRow, primaryAction } from "./components/DownloadRow";
+import { Onboarding } from "./components/Onboarding";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { speedMb } from "./format";
 import { connect, run, useStore } from "./store";
@@ -19,7 +20,30 @@ function inFilter(job: Job, filter: Filter): boolean {
   return job.state === "active" || job.state === "queued" || job.state === "paused";
 }
 
+/** The window: the first-launch steps once, and the download list ever after. */
 export function App() {
+  const [settings, setSettings] = useState<Settings | null>(null);
+  useEffect(() => {
+    void api.getSettings().then(setSettings);
+  }, []);
+
+  // Nothing is drawn until it is known which of the two to show.
+  if (!settings) return null;
+  if (!settings.onboarded) {
+    return (
+      <Onboarding
+        settings={settings}
+        onDone={(chosen) => {
+          setSettings(chosen);
+          run(api.setSettings(chosen));
+        }}
+      />
+    );
+  }
+  return <Downloads />;
+}
+
+function Downloads() {
   const { jobs, health, error } = useStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");

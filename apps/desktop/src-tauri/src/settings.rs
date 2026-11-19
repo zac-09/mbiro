@@ -38,6 +38,8 @@ pub struct Settings {
     pub notify_on_finish: bool,
     /// Follow yt-dlp's nightly builds instead of its stable releases.
     pub yt_dlp_nightly: bool,
+    /// The first-launch steps have been gone through.
+    pub onboarded: bool,
     pub categories: Vec<Category>,
 }
 
@@ -59,6 +61,7 @@ impl Default for Settings {
             watch_clipboard: true,
             notify_on_finish: true,
             yt_dlp_nightly: false,
+            onboarded: false,
             categories: vec![
                 category(
                     "Archives",

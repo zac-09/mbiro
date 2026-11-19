@@ -112,6 +112,8 @@ export interface Settings {
   notifyOnFinish: boolean;
   /** Follow yt-dlp's nightly builds instead of its stable releases. */
   ytDlpNightly: boolean;
+  /** The first-launch steps have been gone through. */
+  onboarded: boolean;
   categories: Category[];
 }
 

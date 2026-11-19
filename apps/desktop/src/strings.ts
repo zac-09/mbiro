@@ -91,6 +91,24 @@ export const strings = {
     nightlyHelp: "Newer and less tested. Turn this on if a site has stopped working.",
   },
 
+  onboarding: {
+    step: (current: number, total: number) => `STEP ${current} OF ${total}`,
+    next: "NEXT",
+    back: "BACK",
+    finish: "START DOWNLOADING",
+    folderHeading: "WHERE SHOULD DOWNLOADS GO?",
+    folderBody:
+      "Files are saved here unless you choose another place for one. You can change this, and give kinds of file their own folders, in Settings.",
+    folderLabel: "SAVE TO",
+    change: "CHANGE",
+    browserHeading: "CATCH DOWNLOADS FROM YOUR BROWSER",
+    browserBody: `The ${PRODUCT_NAME} extension hands a download to this app the moment your browser starts it. The app has already told each browser below where to find it; adding the extension in the browser finishes the job. You can do that later, and the app works without it: paste or copy a link instead.`,
+    browsersLabel: "BROWSERS ON THIS MAC",
+    noBrowsers: "No supported browser was found. Chrome, Edge, Brave and Firefox are supported.",
+    ready: "READY FOR THE EXTENSION",
+    notConnected: "NOT CONNECTED",
+  },
+
   menuBar: {
     openWindow: "OPEN WINDOW",
     linkCopied: "LINK COPIED",
