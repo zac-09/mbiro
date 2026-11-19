@@ -20,6 +20,8 @@ export interface Job {
   finishedAt: number | null;
   /** True while a file is coming down in a way that probably cannot be resumed. */
   resumeDoubtful: boolean;
+  /** The category its name falls in, if any. */
+  category: string | null;
 }
 
 /** Mirrors `EngineHealth`, `ToolStatus` and `ToolProgress` in src-tauri/src/lib.rs. */
@@ -87,6 +89,33 @@ export interface PlaylistInfo {
 /** What a link turned out to be. Mirrors `Found` in src-tauri/src/video.rs. */
 export type Found = ({ kind: "video" } & VideoInfo) | ({ kind: "playlist" } & PlaylistInfo);
 
+/** Mirrors `Settings` and `Category` in src-tauri/src/settings.rs. */
+export interface Category {
+  name: string;
+  extensions: string[];
+  /** Null saves into the default folder. */
+  dir: string | null;
+}
+
+export interface Settings {
+  /** Null is the Mac's Downloads folder. */
+  defaultDir: string | null;
+  maxConcurrent: number;
+  defaultConnections: number;
+  /** Null is no cap. */
+  speedLimitKbps: number | null;
+  watchClipboard: boolean;
+  notifyOnFinish: boolean;
+  categories: Category[];
+}
+
+/** Mirrors `BrowserStatus` in src-tauri/src/browsers.rs. */
+export interface BrowserStatus {
+  name: string;
+  installed: boolean;
+  connected: boolean;
+}
+
 export interface AddDefaults {
   dir: string;
   connections: number;
@@ -102,6 +131,9 @@ export const OPEN_ADD_EVENT = "add:open";
 export const api = {
   engineHealth: () => invoke<EngineHealth>("engine_health"),
   list: () => invoke<Job[]>("list_downloads"),
+  getSettings: () => invoke<Settings>("get_settings"),
+  setSettings: (settings: Settings) => invoke<Settings>("set_settings", { settings }),
+  browserStatus: () => invoke<BrowserStatus[]>("browser_status"),
   addDefaults: () => invoke<AddDefaults>("add_defaults"),
   add: (url: string, dir: string | null, connections: number) =>
     invoke<number>("add_download", { url, dir, connections }),

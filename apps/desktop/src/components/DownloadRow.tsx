@@ -20,7 +20,10 @@ function meta(job: Job): string {
       ? formatSize(job.state === "done" ? job.totalBytes : job.completedBytes)
       : strings.row.progress(formatSize(job.completedBytes), formatSize(job.totalBytes));
   if (job.kind === "video") return `${size} · ${strings.row.video}`;
-  if (job.state !== "active" || job.connections <= 0) return size;
+  // A file that is not moving shows its category, as the design does.
+  if (job.state !== "active" || job.connections <= 0) {
+    return job.category ? `${size} · ${job.category.toUpperCase()}` : size;
+  }
   const connections = `${size} · ${strings.row.connections(job.connections)}`;
   return job.resumeDoubtful ? `${connections} · ${strings.row.mayNotResume}` : connections;
 }

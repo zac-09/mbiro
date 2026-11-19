@@ -7,6 +7,7 @@ mod constants;
 pub mod engine;
 mod ipc;
 pub mod jobs;
+pub mod settings;
 mod shell;
 mod strings;
 pub mod tools;
@@ -300,6 +301,29 @@ fn add_playlist(
     Ok(queued)
 }
 
+#[tauri::command]
+fn get_settings(state: State<'_, AppState>) -> settings::Settings {
+    state.manager.settings()
+}
+
+/// Saves the settings and returns them as stored, with anything out of range corrected.
+#[tauri::command]
+async fn set_settings(
+    state: State<'_, AppState>,
+    settings: settings::Settings,
+) -> Result<settings::Settings, String> {
+    state.manager.set_settings(settings).await
+}
+
+/// Which browsers are here and have been told about the app.
+#[tauri::command]
+fn browser_status(app: AppHandle) -> Vec<browsers::BrowserStatus> {
+    app.path()
+        .home_dir()
+        .map(|home| browsers::status(&home))
+        .unwrap_or_default()
+}
+
 /// What the add dialog starts from.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -312,8 +336,8 @@ struct AddDefaults {
 #[tauri::command]
 fn add_defaults(state: State<'_, AppState>) -> AddDefaults {
     AddDefaults {
-        dir: state.manager.default_dir().to_owned(),
-        connections: engine::DEFAULT_CONNECTIONS,
+        dir: state.manager.default_dir(),
+        connections: state.manager.settings().default_connections,
         max_connections: engine::MAX_CONNECTIONS,
     }
 }
@@ -520,12 +544,18 @@ async fn fetch_tools(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
 /// Looks at the pasteboard only if something new was copied since last time.
 fn watch_clipboard(app: &AppHandle, state: &AppState) {
     let count = clipboard::change_count();
+    let watching = state.manager.settings().watch_clipboard;
     {
         let mut seen = state.clipboard_seen.lock().expect("clipboard lock");
         if *seen == count {
             return;
         }
         *seen = count;
+    }
+    // With watching off the count is still followed, so that turning it on
+    // later does not offer something copied long before.
+    if !watching {
+        return;
     }
     let Some(link) = clipboard::copied_text()
         .as_deref()
@@ -562,13 +592,16 @@ async fn run_queue(app: AppHandle) {
         tick.tick().await;
         let state = app.state::<AppState>();
         if let Ok(finished) = state.manager.tick().await {
+            let notify = state.manager.settings().notify_on_finish;
             for job in finished {
-                let _ = app
-                    .notification()
-                    .builder()
-                    .title(strings::NOTIFY_FINISHED)
-                    .body(&job.name)
-                    .show();
+                if notify {
+                    let _ = app
+                        .notification()
+                        .builder()
+                        .title(strings::NOTIFY_FINISHED)
+                        .body(&job.name)
+                        .show();
+                }
                 let _ = app.emit(constants::FINISHED_EVENT, job);
             }
         }
@@ -634,6 +667,10 @@ pub fn run() {
 
             shell::setup(app)?;
             start_browser_integration(app.handle());
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                handle.state::<AppState>().manager.apply_speed_limit().await;
+            });
             tauri::async_runtime::spawn(run_queue(app.handle().clone()));
             Ok(())
         })
@@ -641,6 +678,9 @@ pub fn run() {
             engine_health,
             list_downloads,
             add_defaults,
+            get_settings,
+            set_settings,
+            browser_status,
             add_download,
             add_video,
             probe_video,

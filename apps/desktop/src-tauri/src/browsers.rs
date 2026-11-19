@@ -15,6 +15,8 @@ use crate::constants::{
 };
 
 struct Browser {
+    /// What the browser is called, for the Settings screen.
+    name: &'static str,
     /// Folder under `~/Library/Application Support` that exists once the browser has run.
     home: &'static str,
     /// Where it looks for host manifests, under the same root.
@@ -31,18 +33,21 @@ fn chromium_origin() -> String {
 
 const BROWSERS: [Browser; 4] = [
     Browser {
+        name: "Chrome",
         home: "Google/Chrome",
         manifests: "Google/Chrome/NativeMessagingHosts",
         allow_key: "allowed_origins",
         allow_value: chromium_origin,
     },
     Browser {
+        name: "Edge",
         home: "Microsoft Edge",
         manifests: "Microsoft Edge/NativeMessagingHosts",
         allow_key: "allowed_origins",
         allow_value: chromium_origin,
     },
     Browser {
+        name: "Brave",
         home: "BraveSoftware/Brave-Browser",
         manifests: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
         allow_key: "allowed_origins",
@@ -50,6 +55,7 @@ const BROWSERS: [Browser; 4] = [
     },
     Browser {
         // Firefox keeps profiles under `Firefox` but reads manifests from `Mozilla`.
+        name: "Firefox",
         home: "Firefox",
         manifests: "Mozilla/NativeMessagingHosts",
         allow_key: "allowed_extensions",
@@ -83,6 +89,32 @@ pub fn install_manifests(home: &Path, host_binary: &Path) -> io::Result<Vec<Path
         written.push(file);
     }
     Ok(written)
+}
+
+/// One browser as the Settings screen shows it.
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserStatus {
+    pub name: &'static str,
+    /// The browser has been run on this Mac.
+    pub installed: bool,
+    /// It has been told where the native messaging host is.
+    pub connected: bool,
+}
+
+pub fn status(home: &Path) -> Vec<BrowserStatus> {
+    let support = home.join("Library/Application Support");
+    BROWSERS
+        .iter()
+        .map(|browser| BrowserStatus {
+            name: browser.name,
+            installed: support.join(browser.home).is_dir(),
+            connected: support
+                .join(browser.manifests)
+                .join(format!("{NATIVE_HOST_NAME}.json"))
+                .is_file(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -122,6 +154,25 @@ mod tests {
         let firefox: Value = serde_json::from_slice(&std::fs::read(&written[1]).unwrap()).unwrap();
         assert_eq!(firefox["allowed_extensions"][0], "extension@mbiro.dev");
         assert!(firefox.get("allowed_origins").is_none());
+
+        let seen = status(&home);
+        assert_eq!(seen.len(), 4);
+        assert_eq!(
+            seen[0],
+            BrowserStatus {
+                name: "Chrome",
+                installed: true,
+                connected: true
+            }
+        );
+        assert_eq!(
+            seen[1],
+            BrowserStatus {
+                name: "Edge",
+                installed: false,
+                connected: false
+            }
+        );
 
         // Edge and Brave get the same manifest as Chrome, each in its own folder.
         std::fs::create_dir_all(support.join("Microsoft Edge")).unwrap();

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -18,8 +18,9 @@ use crate::engine::aria2::Aria2Engine;
 use crate::engine::ytdlp::YtDlpEngine;
 use crate::engine::{
     AddRequest, BrowserContext, Engine, EngineError, JobState, JobStatus, Secret, VideoOptions,
-    DEFAULT_CONNECTIONS, MAX_CONNECTIONS,
+    MAX_CONNECTIONS,
 };
+use crate::settings::Settings;
 
 /// How many times a download that lost its network is put back in the queue
 /// before it is left as failed for the user to retry.
@@ -91,6 +92,8 @@ pub struct JobView {
     pub finished_at: Option<i64>,
     /// True while a file is coming down in a way that probably cannot be resumed.
     pub resume_doubtful: bool,
+    /// The category its name falls in, if any.
+    pub category: Option<String>,
 }
 
 impl JobView {
@@ -152,8 +155,9 @@ pub struct Manager {
     live: Mutex<HashMap<i64, Live>>,
     /// Jobs waiting out a lost network: when to try again, and which try it is.
     retries: Mutex<HashMap<i64, (Instant, u32)>>,
-    default_dir: PathBuf,
-    max_concurrent: usize,
+    /// The Mac's Downloads folder, used when Settings names no other.
+    system_dir: PathBuf,
+    settings: RwLock<Settings>,
     retry_delay: Duration,
 }
 
@@ -190,6 +194,7 @@ fn read_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
             created_at: row.get(14)?,
             finished_at: row.get(15)?,
             resume_doubtful: false,
+            category: None,
         },
         url: row.get(2)?,
         filename: row.get(5)?,
@@ -248,6 +253,24 @@ impl Manager {
             UPDATE jobs SET state = 'queued' WHERE state = 'active';",
         )
         .map_err(db_err)?;
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )
+        .map_err(db_err)?;
+        // Stored settings win; with none stored, the caller's limit seeds the default.
+        let stored: Option<String> = db
+            .query_row("SELECT value FROM settings WHERE key = 'app'", [], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(db_err)?;
+        let settings = stored
+            .and_then(|json| serde_json::from_str::<Settings>(&json).ok())
+            .unwrap_or_else(|| Settings {
+                max_concurrent: config.max_concurrent,
+                ..Settings::default()
+            })
+            .normalised();
         // Columns added after the first version. Each step runs once.
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -267,14 +290,52 @@ impl Manager {
             videos: Mutex::new(videos),
             live: Mutex::default(),
             retries: Mutex::default(),
-            default_dir: config.default_dir,
-            max_concurrent: config.max_concurrent.max(1),
+            system_dir: config.default_dir,
+            settings: RwLock::new(settings),
             retry_delay: config.retry_delay,
         })
     }
 
-    pub fn default_dir(&self) -> &std::path::Path {
-        &self.default_dir
+    /// Where a download goes when nothing more specific applies.
+    pub fn default_dir(&self) -> PathBuf {
+        let settings = self.settings.read().expect("settings lock");
+        settings
+            .default_dir
+            .clone()
+            .unwrap_or_else(|| self.system_dir.clone())
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.settings.read().expect("settings lock").clone()
+    }
+
+    /// Saves new settings and puts them into effect. Returns them as stored,
+    /// with every value brought into range.
+    pub async fn set_settings(&self, settings: Settings) -> DbResult<Settings> {
+        let settings = settings.normalised();
+        let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+        self.with_db(|db| {
+            db.execute(
+                "INSERT INTO settings (key, value) VALUES ('app', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [json],
+            )
+        })?;
+        *self.settings.write().expect("settings lock") = settings.clone();
+        self.apply_speed_limit().await;
+        Ok(settings)
+    }
+
+    /// Tells aria2 the speed cap. Needed at launch and whenever aria2 is restarted.
+    pub async fn apply_speed_limit(&self) {
+        let limit = self
+            .settings
+            .read()
+            .expect("settings lock")
+            .speed_limit_kbps;
+        if let Some(engine) = &self.files {
+            let _ = engine.set_speed_limit(limit.map(|kbps| kbps * 1024)).await;
+        }
     }
 
     pub fn file_engine(&self) -> Option<&Arc<Aria2Engine>> {
@@ -334,11 +395,13 @@ impl Manager {
     /// Every job, oldest first, with live speed where there is one.
     pub fn snapshot(&self) -> DbResult<Vec<JobView>> {
         let jobs = self.load_all()?;
+        let settings = self.settings();
         let live = self.live.lock().expect("live lock");
         Ok(jobs
             .into_iter()
             .map(|job| {
                 let mut view = job.view;
+                view.category = settings.category_of(&view.name).map(|c| c.name.clone());
                 if let (JobState::Active, Some(live)) = (view.state, live.get(&view.id)) {
                     view.speed_bps = live.speed_bps;
                     view.connections = live.connections;
@@ -360,15 +423,30 @@ impl Manager {
     /// Puts a download in the queue and returns its id. It starts on the next
     /// [`Manager::tick`] if a slot is free.
     pub fn add(&self, job: NewJob) -> DbResult<i64> {
-        let dir = job.dir.unwrap_or_else(|| self.default_dir.clone());
         let name = job
             .filename
             .clone()
             .or(job.title.clone())
             .unwrap_or_else(|| placeholder_name(&job.url));
+        let settings = self.settings();
+        // A folder chosen for this download wins; then its category's folder;
+        // then the default. A video is judged by the kind of file it will become.
+        let judged_as = match (&job.kind, &job.video) {
+            (Kind::Video, Some(video)) if video.audio_only => "audio.m4a".to_owned(),
+            (Kind::Video, _) => "video.mp4".to_owned(),
+            (Kind::File, _) => name.clone(),
+        };
+        let dir = job
+            .dir
+            .or_else(|| {
+                settings
+                    .category_of(&judged_as)
+                    .and_then(|category| category.dir.clone())
+            })
+            .unwrap_or_else(|| self.default_dir());
         let connections = job
             .connections
-            .unwrap_or(DEFAULT_CONNECTIONS)
+            .unwrap_or(settings.default_connections)
             .clamp(1, MAX_CONNECTIONS);
         self.with_db(|db| {
             db.execute(
@@ -713,6 +791,8 @@ impl Manager {
         if !matches!(engine.restart_if_dead().await, Ok(true)) {
             return Ok(());
         }
+        // The new aria2 knows nothing of the speed cap either.
+        self.apply_speed_limit().await;
         for job in self.load_all()? {
             if job.view.kind == Kind::File {
                 // The new aria2 knows none of the old ids, paused ones included.
@@ -727,12 +807,13 @@ impl Manager {
 
     async fn fill_slots(&self) -> DbResult<()> {
         let jobs = self.load_all()?;
+        let max_concurrent = self.settings.read().expect("settings lock").max_concurrent;
         let mut running = jobs
             .iter()
             .filter(|job| job.view.state == JobState::Active)
             .count();
         for job in jobs.iter().filter(|job| job.view.state == JobState::Queued) {
-            if running >= self.max_concurrent {
+            if running >= max_concurrent {
                 break;
             }
             let waiting = {

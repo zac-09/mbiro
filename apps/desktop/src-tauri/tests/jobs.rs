@@ -333,3 +333,48 @@ async fn pause_frees_the_slot_and_a_missing_file_fails_then_can_be_retried() {
     engine.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_choose_the_folder_cap_the_speed_and_survive_a_relaunch() {
+    let server = TestServer::start(3 * MB, Duration::ZERO).await;
+    let dir = scratch("settings");
+    let archives = dir.join("archives");
+    std::fs::create_dir_all(&archives).unwrap();
+    let engine = engine(&dir).await;
+    let first = manager(&dir, engine.clone(), 3);
+
+    let mut settings = first.settings();
+    assert_eq!(settings.max_concurrent, 3);
+    settings.max_concurrent = 99; // out of range: corrected, not refused
+    settings.speed_limit_kbps = Some(1024);
+    settings.categories[0].dir = Some(archives.clone());
+    let stored = first.set_settings(settings).await.expect("save settings");
+    assert_eq!(stored.max_concurrent, 10);
+
+    // A zip goes to the Archives folder; anything else to the default one.
+    first.add(file(server.url("bundle.zip"), 4)).unwrap();
+    first.add(file(server.url("notes.bin"), 4)).unwrap();
+    let started = Instant::now();
+    let seen = run_until(&first, "both to finish", all_done).await;
+    let last = seen.last().unwrap();
+    assert_eq!(last[0].dir, archives);
+    assert_eq!(last[0].category.as_deref(), Some("Archives"));
+    assert_eq!(last[1].dir, dir.join("downloads"));
+    assert_eq!(last[1].category, None);
+    assert!(archives.join("bundle.zip").exists());
+    // 6 MB in all at 1 MB/s: several seconds, where unthrottled it takes a moment.
+    assert!(
+        started.elapsed() > Duration::from_secs(3),
+        "the speed cap was not applied"
+    );
+
+    drop(first);
+    let second = manager(&dir, engine.clone(), 3);
+    let kept = second.settings();
+    assert_eq!(kept.max_concurrent, 10);
+    assert_eq!(kept.speed_limit_kbps, Some(1024));
+    assert_eq!(kept.categories[0].dir.as_deref(), Some(archives.as_path()));
+
+    engine.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

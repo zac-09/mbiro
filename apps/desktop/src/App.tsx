@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { OPEN_ADD_EVENT, api, type Job } from "./api";
 import { AddDialog } from "./components/AddDialog";
 import { DownloadRow, primaryAction } from "./components/DownloadRow";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { speedMb } from "./format";
 import { connect, run, useStore } from "./store";
 import { strings } from "./strings";
@@ -26,6 +27,7 @@ export function App() {
   const [confirming, setConfirming] = useState<number | null>(null);
   /** The add dialog is open when this is a string: the link to start with. */
   const [adding, setAdding] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(connect, []);
 
@@ -33,6 +35,18 @@ export function App() {
   useEffect(() => {
     const unlisten = listen<string>(OPEN_ADD_EVENT, (event) => setAdding(event.payload));
     return () => void unlisten.then((stop) => stop());
+  }, []);
+
+  // Command-comma opens Settings, as on any Mac app.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.metaKey && event.key === ",") {
+        event.preventDefault();
+        setSettingsOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   // Pasting a link anywhere outside a text field opens the add dialog with it.
@@ -215,7 +229,14 @@ export function App() {
         </ul>
       )}
 
+      <footer className="mt-auto flex flex-wrap items-center justify-end gap-[10px] border-t border-rule-strong pt-3">
+        <button type="button" className={secondaryButton} onClick={() => setSettingsOpen(true)}>
+          {strings.openSettings}
+        </button>
+      </footer>
+
       {adding !== null && <AddDialog initialUrl={adding} onClose={() => setAdding(null)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
