@@ -81,6 +81,14 @@ export const strings = {
     tools: "VIDEO TOOLS",
     installed: "INSTALLED",
     missing: "NOT INSTALLED",
+    toolsUpdateHelp:
+      "The first tool is checked for a newer version once a day, because sites change often. The other two change with the app.",
+    updateNow: "UPDATE NOW",
+    updating: "CHECKING…",
+    checked: (when: string) => `CHECKED ${when}`,
+    neverChecked: "NOT CHECKED YET",
+    nightly: "NIGHTLY BUILDS",
+    nightlyHelp: "Newer and less tested. Turn this on if a site has stopped working.",
   },
 
   menuBar: {

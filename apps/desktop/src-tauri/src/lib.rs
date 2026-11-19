@@ -59,16 +59,15 @@ impl AppState {
 
 /// The video engine, if every tool it needs is in place.
 fn video_engine_if_ready(root: &std::path::Path) -> Option<Arc<YtDlpEngine>> {
-    tools::ALL
-        .iter()
-        .all(|tool| tool.is_installed(root))
-        .then(|| {
-            Arc::new(YtDlpEngine::new(ToolPaths {
-                yt_dlp: tools::YT_DLP.executable_path(root),
-                deno: tools::DENO.executable_path(root),
-                ffmpeg: tools::FFMPEG.executable_path(root),
-            }))
-        })
+    let yt_dlp = tools::yt_dlp_executable(root)?;
+    let helpers = tools::DENO.is_installed(root) && tools::FFMPEG.is_installed(root);
+    helpers.then(|| {
+        Arc::new(YtDlpEngine::new(ToolPaths {
+            yt_dlp,
+            deno: tools::DENO.executable_path(root),
+            ffmpeg: tools::FFMPEG.executable_path(root),
+        }))
+    })
 }
 
 #[tauri::command]
@@ -230,7 +229,7 @@ fn http_url(text: &str) -> Result<Url, String> {
 async fn probe_video(state: State<'_, AppState>, url: String) -> Result<video::Found, String> {
     let url = http_url(&url)?;
     let engine = state.manager.video_engine().ok_or(strings::TOOLS_MISSING)?;
-    video::probe(engine.tools(), &url).await
+    video::probe(&engine.tools(), &url).await
 }
 
 /// Queues a video with the quality picked in the add dialog.
@@ -486,8 +485,12 @@ fn start_browser_integration(app: &AppHandle) {
 #[serde(rename_all = "camelCase")]
 struct ToolStatus {
     name: &'static str,
-    version: &'static str,
+    version: String,
     installed: bool,
+    /// Only yt-dlp is kept up to date on its own.
+    updatable: bool,
+    /// When updates were last looked for, in seconds since 1970.
+    checked_at: Option<i64>,
 }
 
 #[derive(Clone, Serialize)]
@@ -500,14 +503,89 @@ struct ToolProgress {
 
 #[tauri::command]
 fn tools_status(state: State<'_, AppState>) -> Vec<ToolStatus> {
-    tools::ALL
-        .iter()
-        .map(|tool| ToolStatus {
-            name: tool.name,
-            version: tool.version,
-            installed: tool.is_installed(&state.tools_dir),
-        })
-        .collect()
+    let root = &state.tools_dir;
+    let fixed = |tool: &'static tools::Tool| ToolStatus {
+        name: tool.name,
+        version: tool.version.to_owned(),
+        installed: tool.is_installed(root),
+        updatable: false,
+        checked_at: None,
+    };
+    let yt_dlp = ToolStatus {
+        name: tools::YT_DLP.name,
+        version: tools::yt_dlp_version(root).unwrap_or_else(|| tools::YT_DLP.version.to_owned()),
+        installed: tools::yt_dlp_executable(root).is_some(),
+        updatable: true,
+        checked_at: tools::yt_dlp_state(root).map(|state| state.checked_at),
+    };
+    vec![yt_dlp, fixed(&tools::DENO), fixed(&tools::FFMPEG)]
+}
+
+fn tool_error(error: tools::ToolError) -> String {
+    match error {
+        tools::ToolError::ChecksumMismatch => strings::TOOL_CHECKSUM_FAILED.to_owned(),
+        _ => strings::TOOL_FETCH_FAILED.to_owned(),
+    }
+}
+
+/// Looks for a newer yt-dlp on the chosen channel, installs it if there is
+/// one, and points the video engine at it. Does nothing if yt-dlp was never installed.
+async fn update_yt_dlp(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if tools::yt_dlp_executable(&state.tools_dir).is_none() {
+        return Ok(());
+    }
+    if state.fetching_tools.swap(true, Ordering::SeqCst) {
+        return Err(strings::TOOLS_BUSY.to_owned());
+    }
+    let channel = if state.manager.settings().yt_dlp_nightly {
+        tools::Channel::Nightly
+    } else {
+        tools::Channel::Stable
+    };
+    let report = |received, total| {
+        let progress = ToolProgress {
+            name: tools::YT_DLP.name,
+            received,
+            total,
+        };
+        let _ = app.emit(constants::TOOL_PROGRESS_EVENT, progress);
+    };
+    let outcome = tools::update_yt_dlp(&state.tools_dir, channel, report).await;
+    state.fetching_tools.store(false, Ordering::SeqCst);
+    outcome.map_err(tool_error)?;
+    if let (Some(engine), Some(path)) = (
+        state.manager.video_engine(),
+        tools::yt_dlp_executable(&state.tools_dir),
+    ) {
+        engine.set_yt_dlp(path);
+    }
+    Ok(())
+}
+
+/// "Update now" in Settings.
+#[tauri::command]
+async fn update_tools(app: AppHandle) -> Result<(), String> {
+    update_yt_dlp(&app).await
+}
+
+/// Once a day, and shortly after launch if a day has passed, look for a newer
+/// yt-dlp. Sites change more often than the app is released.
+async fn keep_yt_dlp_fresh(app: AppHandle) {
+    const DAY: i64 = 24 * 60 * 60;
+    tokio::time::sleep(Duration::from_secs(45)).await;
+    loop {
+        let root = app.state::<AppState>().tools_dir.clone();
+        let checked = tools::yt_dlp_state(&root).map_or(0, |state| state.checked_at);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        if now - checked >= DAY {
+            // A failure (offline, say) is simply tried again in an hour.
+            let _ = update_yt_dlp(&app).await;
+        }
+        tokio::time::sleep(Duration::from_secs(60 * 60)).await;
+    }
 }
 
 /// Fetches whichever video tools are missing. Started only by the user.
@@ -518,6 +596,10 @@ async fn fetch_tools(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     }
     let mut outcome = Ok(());
     for tool in tools::ALL {
+        // An updated yt-dlp stands in for the pinned first install.
+        if tool.name == tools::YT_DLP.name && tools::yt_dlp_executable(&state.tools_dir).is_some() {
+            continue;
+        }
         let report = |received, total| {
             let progress = ToolProgress {
                 name: tool.name,
@@ -527,10 +609,7 @@ async fn fetch_tools(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
             let _ = app.emit(constants::TOOL_PROGRESS_EVENT, progress);
         };
         if let Err(error) = tool.install(&state.tools_dir, report).await {
-            outcome = Err(match error {
-                tools::ToolError::ChecksumMismatch => strings::TOOL_CHECKSUM_FAILED.to_owned(),
-                _ => strings::TOOL_FETCH_FAILED.to_owned(),
-            });
+            outcome = Err(tool_error(error));
             break;
         }
     }
@@ -648,6 +727,8 @@ pub fn run() {
             };
 
             let tools_dir = data_dir.join("tools");
+            // Nothing is running yet, so superseded copies of yt-dlp can go.
+            tools::remove_old_yt_dlp(&tools_dir);
             let config = jobs::Config {
                 db_path: data_dir.join("jobs.sqlite"),
                 default_dir: app.path().download_dir()?,
@@ -667,6 +748,7 @@ pub fn run() {
 
             shell::setup(app)?;
             start_browser_integration(app.handle());
+            tauri::async_runtime::spawn(keep_yt_dlp_fresh(app.handle().clone()));
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 handle.state::<AppState>().manager.apply_speed_limit().await;
@@ -696,6 +778,7 @@ pub fn run() {
             copied_link,
             use_copied_link,
             tools_status,
+            update_tools,
             fetch_tools,
         ])
         .build(tauri::generate_context!())

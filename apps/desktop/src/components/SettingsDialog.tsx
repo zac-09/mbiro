@@ -10,6 +10,7 @@ import {
   type ToolProgress,
   type ToolStatus,
 } from "../api";
+import { clock } from "../format";
 import { strings } from "../strings";
 import { fieldLabel, primaryButton, secondaryButton } from "../ui";
 import { Switch } from "./Switch";
@@ -149,6 +150,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [tools, setTools] = useState<ToolStatus[]>([]);
   const [fetching, setFetching] = useState<ToolProgress | "starting" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     dialog.current?.showModal();
@@ -196,6 +198,45 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         setFetching(null);
         void api.toolsStatus().then(setTools);
       });
+  };
+
+  const updateTools = () => {
+    setError(null);
+    setUpdating(true);
+    api
+      .updateTools()
+      .catch((reason: unknown) => setError(String(reason)))
+      .finally(() => {
+        setUpdating(false);
+        setFetching(null);
+        void api.toolsStatus().then(setTools);
+      });
+  };
+
+  /** Switching channel only matters once the tool from that channel is fetched. */
+  const setNightly = (ytDlpNightly: boolean) => {
+    if (!settings) return;
+    setError(null);
+    setUpdating(true);
+    api
+      .setSettings({ ...settings, ytDlpNightly })
+      .then((stored) => {
+        setSettings(stored);
+        return api.updateTools();
+      })
+      .catch((reason: unknown) => setError(String(reason)))
+      .finally(() => {
+        setUpdating(false);
+        setFetching(null);
+        void api.toolsStatus().then(setTools);
+      });
+  };
+
+  /** The day is left out when it is today. */
+  const when = (seconds: number) => {
+    const date = new Date(seconds * 1000);
+    const today = new Date().toDateString() === date.toDateString();
+    return today ? clock(seconds) : `${date.toLocaleDateString()} ${clock(seconds)}`;
   };
 
   const toolsReady = tools.length > 0 && tools.every((tool) => tool.installed);
@@ -338,10 +379,36 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <Section title={t.tools}>
           <p className="m-0 pt-2 text-[12px] leading-[1.5] text-muted">{strings.add.toolsNeeded}</p>
           {tools.map((tool) => (
-            <Row key={tool.name} name={tool.name.toUpperCase()} help={tool.version}>
+            <Row
+              key={tool.name}
+              name={tool.name.toUpperCase()}
+              help={
+                tool.updatable && tool.installed
+                  ? `${tool.version} · ${tool.checkedAt ? t.checked(when(tool.checkedAt)) : t.neverChecked}`
+                  : tool.version
+              }
+            >
               <Status good={tool.installed} label={tool.installed ? t.installed : t.missing} />
+              {tool.updatable && tool.installed && (
+                <button
+                  type="button"
+                  className={secondaryButton}
+                  disabled={updating}
+                  onClick={updateTools}
+                >
+                  {updating ? t.updating : t.updateNow}
+                </button>
+              )}
             </Row>
           ))}
+          {toolsReady && settings && (
+            <>
+              <Row name={t.nightly} help={t.nightlyHelp}>
+                <Switch label={t.nightly} on={settings.ytDlpNightly} onChange={setNightly} />
+              </Row>
+              <p className="m-0 text-[12px] leading-[1.5] text-muted">{t.toolsUpdateHelp}</p>
+            </>
+          )}
           {!toolsReady && (
             <button
               type="button"

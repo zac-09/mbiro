@@ -41,26 +41,33 @@ struct Job {
 type Jobs = Arc<Mutex<HashMap<String, Job>>>;
 
 pub struct YtDlpEngine {
-    tools: ToolPaths,
+    /// Replaceable: yt-dlp is updated while the app runs.
+    tools: std::sync::RwLock<ToolPaths>,
     jobs: Jobs,
     next: AtomicU64,
 }
 
 impl YtDlpEngine {
-    pub fn tools(&self) -> &ToolPaths {
-        &self.tools
+    pub fn tools(&self) -> ToolPaths {
+        self.tools.read().expect("tools lock").clone()
+    }
+
+    /// Points new downloads at a newer yt-dlp. Ones already running finish on the old.
+    pub fn set_yt_dlp(&self, path: PathBuf) {
+        self.tools.write().expect("tools lock").yt_dlp = path;
     }
 
     pub fn new(tools: ToolPaths) -> Self {
         Self {
-            tools,
+            tools: std::sync::RwLock::new(tools),
             jobs: Jobs::default(),
             next: AtomicU64::new(1),
         }
     }
 
     fn command(&self, request: &AddRequest) -> Command {
-        let mut command = Command::new(&self.tools.yt_dlp);
+        let tools = self.tools();
+        let mut command = Command::new(&tools.yt_dlp);
         match &request.video {
             Some(video) if video.audio_only => {
                 command.args(["--format", &video.format, "--extract-audio"]);
@@ -77,9 +84,9 @@ impl YtDlpEngine {
             .arg("--ignore-config")
             .arg("--no-playlist")
             .arg("--js-runtimes")
-            .arg(format!("deno:{}", self.tools.deno.display()))
+            .arg(format!("deno:{}", tools.deno.display()))
             .arg("--ffmpeg-location")
-            .arg(&self.tools.ffmpeg)
+            .arg(&tools.ffmpeg)
             .arg("--paths")
             .arg(&request.dir)
             .args(["--output", "%(title).200B.%(ext)s"])

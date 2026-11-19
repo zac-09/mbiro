@@ -32,6 +32,10 @@ export interface ToolStatus {
   name: string;
   version: string;
   installed: boolean;
+  /** Only yt-dlp is kept up to date on its own. */
+  updatable: boolean;
+  /** When updates were last looked for, in seconds since 1970. */
+  checkedAt: number | null;
 }
 
 export interface ToolProgress {
@@ -106,6 +110,8 @@ export interface Settings {
   speedLimitKbps: number | null;
   watchClipboard: boolean;
   notifyOnFinish: boolean;
+  /** Follow yt-dlp's nightly builds instead of its stable releases. */
+  ytDlpNightly: boolean;
   categories: Category[];
 }
 
@@ -153,5 +159,6 @@ export const api = {
   copiedLink: () => invoke<string | null>("copied_link"),
   useCopiedLink: () => invoke<null>("use_copied_link"),
   toolsStatus: () => invoke<ToolStatus[]>("tools_status"),
+  updateTools: () => invoke<null>("update_tools"),
   fetchTools: () => invoke<null>("fetch_tools"),
 };

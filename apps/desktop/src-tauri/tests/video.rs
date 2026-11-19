@@ -129,6 +129,52 @@ async fn fetches_the_tools_then_downloads_and_merges_a_clip() {
 
     engine.remove(&id).await.expect("remove");
 
+    // The update check: ask the stable channel for its newest release and
+    // install it, verified against the checksum that release publishes.
+    let version = mbiro_desktop::tools::update_yt_dlp(
+        &tools_dir,
+        mbiro_desktop::tools::Channel::Stable,
+        |_, _| {},
+    )
+    .await
+    .expect("update yt-dlp");
+    let updated = mbiro_desktop::tools::yt_dlp_executable(&tools_dir).expect("an updated yt-dlp");
+    let reported = Command::new(&updated)
+        .arg("--version")
+        .output()
+        .expect("run the updated yt-dlp");
+    assert_eq!(String::from_utf8_lossy(&reported.stdout).trim(), version);
+    assert!(
+        version.as_str() >= YT_DLP.version,
+        "the newest release is not older than the pinned one"
+    );
+    engine.set_yt_dlp(updated);
+
+    // The nightly channel comes from a different repository; it must install
+    // and run the same way. Kept in its own folder so the two do not mix.
+    let nightly_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/test-tools-nightly");
+    let nightly = mbiro_desktop::tools::update_yt_dlp(
+        &nightly_dir,
+        mbiro_desktop::tools::Channel::Nightly,
+        |_, _| {},
+    )
+    .await
+    .expect("update to nightly");
+    let state = mbiro_desktop::tools::yt_dlp_state(&nightly_dir).expect("nightly state");
+    assert_eq!(state.version, nightly);
+    assert_eq!(state.channel, mbiro_desktop::tools::Channel::Nightly);
+    let exe = mbiro_desktop::tools::yt_dlp_executable(&nightly_dir).expect("a nightly yt-dlp");
+    let reported = Command::new(&exe)
+        .arg("--version")
+        .output()
+        .expect("run the nightly yt-dlp");
+    assert!(reported.status.success());
+    assert!(
+        String::from_utf8_lossy(&reported.stdout).trim() >= YT_DLP.version,
+        "a nightly is not older than the pinned release"
+    );
+
     // The look-up the add dialog does, and a download of the sound alone.
     let page = format!("http://{addr}/clip.mpd").parse().unwrap();
     let found = video::probe(&paths, &page).await.expect("probe");

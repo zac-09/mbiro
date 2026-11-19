@@ -36,6 +36,8 @@ pub struct Settings {
     pub speed_limit_kbps: Option<u64>,
     pub watch_clipboard: bool,
     pub notify_on_finish: bool,
+    /// Follow yt-dlp's nightly builds instead of its stable releases.
+    pub yt_dlp_nightly: bool,
     pub categories: Vec<Category>,
 }
 
@@ -56,6 +58,7 @@ impl Default for Settings {
             speed_limit_kbps: None,
             watch_clipboard: true,
             notify_on_finish: true,
+            yt_dlp_nightly: false,
             categories: vec![
                 category(
                     "Archives",
