@@ -1,7 +1,9 @@
 //! Tells browsers where the native messaging host is, by writing a small
 //! manifest into each installed browser's folder (PLAN.md section 5).
 //!
-//! Spike 4 covers Chrome and Firefox. Edge and Brave follow in M2.
+//! Covers Chrome, Edge, Brave and Firefox. Until the extension is in the stores
+//! only the development build's id is allowed; Edge's store assigns its own id,
+//! separate from Chrome's, and both must be listed here once they exist.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -22,12 +24,29 @@ struct Browser {
     allow_value: fn() -> String,
 }
 
-const BROWSERS: [Browser; 2] = [
+/// Chrome, Edge and Brave share one engine and one manifest format.
+fn chromium_origin() -> String {
+    format!("chrome-extension://{CHROME_EXTENSION_ID_DEV}/")
+}
+
+const BROWSERS: [Browser; 4] = [
     Browser {
         home: "Google/Chrome",
         manifests: "Google/Chrome/NativeMessagingHosts",
         allow_key: "allowed_origins",
-        allow_value: || format!("chrome-extension://{CHROME_EXTENSION_ID_DEV}/"),
+        allow_value: chromium_origin,
+    },
+    Browser {
+        home: "Microsoft Edge",
+        manifests: "Microsoft Edge/NativeMessagingHosts",
+        allow_key: "allowed_origins",
+        allow_value: chromium_origin,
+    },
+    Browser {
+        home: "BraveSoftware/Brave-Browser",
+        manifests: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
+        allow_key: "allowed_origins",
+        allow_value: chromium_origin,
     },
     Browser {
         // Firefox keeps profiles under `Firefox` but reads manifests from `Mozilla`.
@@ -103,6 +122,24 @@ mod tests {
         let firefox: Value = serde_json::from_slice(&std::fs::read(&written[1]).unwrap()).unwrap();
         assert_eq!(firefox["allowed_extensions"][0], "extension@mbiro.dev");
         assert!(firefox.get("allowed_origins").is_none());
+
+        // Edge and Brave get the same manifest as Chrome, each in its own folder.
+        std::fs::create_dir_all(support.join("Microsoft Edge")).unwrap();
+        std::fs::create_dir_all(support.join("BraveSoftware/Brave-Browser")).unwrap();
+        let written = install_manifests(&home, Path::new("/x/nm-host")).unwrap();
+        assert_eq!(written.len(), 4);
+        for folder in ["Microsoft Edge", "BraveSoftware/Brave-Browser"] {
+            let file = support
+                .join(folder)
+                .join("NativeMessagingHosts/dev.mbiro.host.json");
+            assert!(written.contains(&file), "{folder} got no manifest");
+            let manifest: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+            assert_eq!(
+                manifest["allowed_origins"][0],
+                "chrome-extension://jcggnjbklbbladijcfhnbhnihdpahjga/"
+            );
+            assert_eq!(manifest["path"], "/x/nm-host");
+        }
 
         let _ = std::fs::remove_dir_all(&home);
     }
