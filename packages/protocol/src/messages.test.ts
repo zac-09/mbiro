@@ -72,6 +72,9 @@ describe("statusReplySchema", () => {
       completedBytes: 4,
       finishedAt: null,
     });
-    expect(ackSchema.parse(JSON.parse('{"type":"ack","ok":true}'))).toEqual({ type: "ack", ok: true });
+    expect(ackSchema.parse(JSON.parse('{"type":"ack","ok":true}'))).toEqual({
+      type: "ack",
+      ok: true,
+    });
   });
 });

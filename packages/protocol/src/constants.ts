@@ -18,3 +18,9 @@ export const FIREFOX_EXTENSION_ID = "extension@mbiro.dev";
  */
 export const CHROME_EXTENSION_KEY_DEV =
   "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtdyM8DF6hIXoQurV/mrCBt/RZRmh7Vlzd/myd3YCEKtRGk49Uks1uNbX3fhyOfy5qW0MFEfq2/BGtuo5bcKGWrIVflnPypy3dOOMBqQ68WnbC+Ov+kWRxPClyZQa1vNr8kzjPx+yoD1ruF0AgZZYVI+3rp/Ue4WowRsLiN/exS2DtnZ+kZ4cB8ZHZWLua8ZJH0LNa07dGMkyK5rceeY8CB6tdhqrmH6bNJDwRB6JURuqC1+kGtUPhW+nTWjzfLosFCckgJs+pK912nhxLPzELfsAhSIM5HTHDs3PQFesJlveYJOH/Vrk5aZR3UlP+h75RZBd8RTex8A+PcVU9KZciwIDAQAB";
+
+/**
+ * Where the extension's "Get the app" button leads. Unset until the website's
+ * address is decided (PLAN.md section 14); the button stays hidden until then.
+ */
+export const DOWNLOAD_PAGE_URL: string | null = null;

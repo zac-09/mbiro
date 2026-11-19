@@ -1,0 +1,445 @@
+/* Fonts ship inside the extension; nothing is fetched at runtime. */
+@import "@fontsource/barlow-condensed/600.css";
+@import "@fontsource/barlow-condensed/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/* Design tokens from DESIGN.md. Sizes below are the reference screens' own. */
+:root {
+  --bg: #0c0d0e;
+  --field: #141618;
+  --ink: #f2f4f5;
+  --muted: #a7adb2;
+  --soft: #d4d8db;
+  --accent: #c6f432;
+  --rule-strong: #2a2d30;
+  --rule: #1f2224;
+  --border: #3c4044;
+  --danger: #ff5a3c;
+  --danger-ink: #ff9a80;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+button,
+input {
+  font-family: inherit;
+}
+button {
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+p {
+  margin: 0;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.blink {
+  animation: blink 0.9s steps(2, jump-none) infinite;
+}
+.drop {
+  animation: drop 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .blink,
+  .drop {
+    animation: none;
+  }
+  button {
+    transition: none;
+  }
+}
+
+/* Shared pieces */
+.wordmark {
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+}
+.label {
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.name {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.secondary {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+.secondary:hover {
+  border-color: var(--muted);
+}
+.primary {
+  min-height: 44px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.primary:hover {
+  filter: brightness(1.1);
+}
+.pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.switch {
+  display: flex;
+  flex: none;
+}
+.switch button {
+  min-width: 48px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.switch button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+.field {
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--field);
+  color: var(--ink);
+  font-size: 14px;
+}
+.error {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--danger-ink);
+}
+
+/* Popup */
+.popup {
+  width: 340px;
+  box-sizing: border-box;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+.popup.connected {
+  min-height: 540px;
+  gap: 14px;
+}
+.popup.offline {
+  min-height: 380px;
+  gap: 16px;
+}
+.popup header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.popup.offline .wordmark {
+  color: var(--muted);
+}
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+}
+.status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  animation: blink 0.9s steps(2, jump-none) infinite;
+}
+.status.down {
+  color: var(--danger-ink);
+}
+.status.down::before {
+  background: var(--danger);
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .status::before {
+    animation: none;
+  }
+}
+.setting {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.setting + .setting {
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.setting .text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.setting .name {
+  font-size: 21px;
+}
+.setting .site {
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sent {
+  display: flex;
+  flex-direction: column;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule-strong);
+  min-height: 0;
+}
+.sent ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 190px;
+  overflow-y: auto;
+}
+.sent li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.sent li:last-child {
+  border-bottom: 0;
+}
+.sent .file {
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sent .detail {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.popup footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule-strong);
+}
+.offline-heading {
+  font-family: var(--display);
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 0.92;
+  letter-spacing: 0.02em;
+}
+.offline-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--soft);
+}
+.offline-actions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.offline-actions .primary {
+  min-height: 48px;
+  font-size: 19px;
+}
+
+/* Capture rules page */
+.rules {
+  width: 760px;
+  max-width: 100%;
+  min-height: 700px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.rules header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.rules h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 0.9;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.rules .product {
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.rule {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px 24px;
+}
+.rule + .rule,
+.block {
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+.rule .text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rules .name {
+  font-size: 22px;
+}
+.help {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.size {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.size .field {
+  width: 84px;
+  text-align: right;
+}
+.size .unit {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.block .head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.block .wide {
+  width: 100%;
+}
+.sites {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sites li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13px;
+}
+.sites li:last-child {
+  border-bottom: 0;
+}
+.add-site {
+  display: flex;
+  gap: 10px;
+}
+.add-site .field {
+  flex: auto;
+  min-width: 0;
+  font-size: 13px;
+}
