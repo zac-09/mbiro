@@ -24,8 +24,29 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
+    /// Download this link.
     Download(DownloadRequest),
+    /// How are these downloads, which the extension sent earlier, getting on?
+    Status { version: u32, ids: Vec<String> },
+    /// Bring the app's window forward.
+    Open { version: u32 },
+    /// The user wants the browser to download this after all: drop it.
+    Cancel { version: u32, id: String },
 }
+
+impl Request {
+    fn version(&self) -> u32 {
+        match self {
+            Self::Download(request) => request.version,
+            Self::Status { version, .. }
+            | Self::Open { version }
+            | Self::Cancel { version, .. } => *version,
+        }
+    }
+}
+
+/// The most downloads one status request may ask about.
+pub const MAX_STATUS_IDS: usize = 50;
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -64,7 +85,49 @@ pub struct Ack {
     code: Option<RefusalCode>,
 }
 
+/// One download the extension asked about. Nothing here was not already the
+/// extension's own: it sent the download in the first place.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobSummary {
+    pub id: String,
+    pub name: String,
+    pub state: crate::engine::JobState,
+    pub total_bytes: u64,
+    pub completed_bytes: u64,
+    pub finished_at: Option<i64>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "type", rename = "status")]
+pub struct StatusReply {
+    pub jobs: Vec<JobSummary>,
+}
+
+/// Everything the app ever says back.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum Reply {
+    Ack(Ack),
+    Status(StatusReply),
+}
+
+impl From<Ack> for Reply {
+    fn from(ack: Ack) -> Self {
+        Self::Ack(ack)
+    }
+}
+
 impl Ack {
+    /// Done, with nothing to hand back.
+    pub fn done() -> Self {
+        Self {
+            ok: true,
+            id: None,
+            code: None,
+        }
+    }
+
     pub fn accepted(id: String) -> Self {
         Self {
             ok: true,
@@ -100,7 +163,7 @@ pub fn bind(path: &Path) -> io::Result<UnixListener> {
 pub async fn serve<F, Fut>(listener: UnixListener, handle: F)
 where
     F: Fn(Request) -> Fut + Clone + Send + 'static,
-    Fut: Future<Output = Ack> + Send,
+    Fut: Future<Output = Reply> + Send,
 {
     while let Ok((stream, _)) = listener.accept().await {
         let handle = handle.clone();
@@ -113,7 +176,7 @@ where
 async fn answer<F, Fut>(mut stream: UnixStream, handle: F) -> io::Result<()>
 where
     F: Fn(Request) -> Fut,
-    Fut: Future<Output = Ack>,
+    Fut: Future<Output = Reply>,
 {
     let len = stream.read_u32_le().await? as usize;
     if len > MAX_FRAME {
@@ -125,15 +188,15 @@ where
     let mut payload = vec![0u8; len];
     stream.read_exact(&mut payload).await?;
 
-    let ack = match serde_json::from_slice::<Request>(&payload) {
-        Ok(Request::Download(request)) if request.version != PROTOCOL_VERSION => {
-            Ack::refused(RefusalCode::UnsupportedVersion)
+    let reply = match serde_json::from_slice::<Request>(&payload) {
+        Ok(request) if request.version() != PROTOCOL_VERSION => {
+            Ack::refused(RefusalCode::UnsupportedVersion).into()
         }
         Ok(request) => handle(request).await,
-        Err(_) => Ack::refused(RefusalCode::InvalidMessage),
+        Err(_) => Ack::refused(RefusalCode::InvalidMessage).into(),
     };
 
-    let reply = serde_json::to_vec(&ack).map_err(io::Error::other)?;
+    let reply = serde_json::to_vec(&reply).map_err(io::Error::other)?;
     stream.write_u32_le(reply.len() as u32).await?;
     stream.write_all(&reply).await?;
     stream.shutdown().await
@@ -170,11 +233,25 @@ mod tests {
         let path = socket(name);
         let listener = bind(&path).unwrap();
         tokio::spawn(serve(listener, |request| async move {
-            let Request::Download(request) = request;
-            if request.url.starts_with("http") {
-                Ack::accepted("gid-1".into())
-            } else {
-                Ack::refused(RefusalCode::UnsupportedUrl)
+            match request {
+                Request::Download(request) if request.url.starts_with("http") => {
+                    Ack::accepted("gid-1".into()).into()
+                }
+                Request::Download(_) => Ack::refused(RefusalCode::UnsupportedUrl).into(),
+                Request::Open { .. } | Request::Cancel { .. } => Ack::done().into(),
+                Request::Status { ids, .. } => Reply::Status(StatusReply {
+                    jobs: ids
+                        .into_iter()
+                        .map(|id| JobSummary {
+                            id,
+                            name: "a.bin".into(),
+                            state: crate::engine::JobState::Active,
+                            total_bytes: 10,
+                            completed_bytes: 4,
+                            finished_at: None,
+                        })
+                        .collect(),
+                }),
             }
         }));
         path
@@ -224,7 +301,9 @@ mod tests {
         let message = br#"{"type":"download","version":1,"url":"https://host/a.zip",
             "filename":"a.zip","referrer":"https://host/page","userAgent":"UA/1",
             "cookies":"session=hunter2"}"#;
-        let Request::Download(request) = serde_json::from_slice(message).unwrap();
+        let Request::Download(request) = serde_json::from_slice(message).unwrap() else {
+            panic!("not a download request")
+        };
         assert_eq!(request.filename.as_deref(), Some("a.zip"));
         assert_eq!(request.referrer.as_deref(), Some("https://host/page"));
         assert_eq!(request.user_agent.as_deref(), Some("UA/1"));
@@ -233,6 +312,35 @@ mod tests {
             "session=hunter2"
         );
         assert!(!format!("{request:?}").contains("hunter2"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answers_status_open_and_cancel() {
+        let path = start("more").await;
+        let reply = ask(
+            path.clone(),
+            br#"{"type":"status","version":1,"ids":["7"]}"#,
+        )
+        .await;
+        assert_eq!(
+            reply,
+            r#"{"type":"status","jobs":[{"id":"7","name":"a.bin","state":"active","totalBytes":10,"completedBytes":4,"finishedAt":null}]}"#
+        );
+        let done = r#"{"type":"ack","ok":true}"#;
+        assert_eq!(
+            ask(path.clone(), br#"{"type":"open","version":1}"#).await,
+            done
+        );
+        assert_eq!(
+            ask(path.clone(), br#"{"type":"cancel","version":1,"id":"7"}"#).await,
+            done
+        );
+        let old = ask(path.clone(), br#"{"type":"open","version":9}"#).await;
+        assert_eq!(
+            old,
+            r#"{"type":"ack","ok":false,"code":"unsupported_version"}"#
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test(flavor = "multi_thread")]

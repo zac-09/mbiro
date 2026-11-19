@@ -378,24 +378,61 @@ async fn serve_browsers(app: AppHandle, listener: tokio::net::UnixListener) {
     ipc::serve(listener, move |request| {
         let app = app.clone();
         async move {
-            let ipc::Request::Download(request) = request;
-            let spec = DownloadSpec {
-                kind: Kind::File,
-                url: request.url,
-                dir: None,
-                filename: request.filename,
-                connections: None,
-                context: BrowserContext {
-                    referrer: request.referrer,
-                    user_agent: request.user_agent,
-                    cookies: request.cookies,
+            let state = app.state::<AppState>();
+            match request {
+                ipc::Request::Download(request) => {
+                    let spec = DownloadSpec {
+                        kind: Kind::File,
+                        url: request.url,
+                        dir: None,
+                        filename: request.filename,
+                        connections: None,
+                        context: BrowserContext {
+                            referrer: request.referrer,
+                            user_agent: request.user_agent,
+                            cookies: request.cookies,
+                        },
+                        video: None,
+                        title: None,
+                    };
+                    match queue_download(&state, spec) {
+                        Ok(id) => ipc::Ack::accepted(id.to_string()).into(),
+                        Err(error) => ipc::Ack::refused(error.code()).into(),
+                    }
+                }
+                ipc::Request::Status { ids, .. } => {
+                    let wanted: Vec<i64> = ids
+                        .iter()
+                        .take(ipc::MAX_STATUS_IDS)
+                        .filter_map(|id| id.parse().ok())
+                        .collect();
+                    let jobs = state.manager.snapshot().unwrap_or_default();
+                    ipc::Reply::Status(ipc::StatusReply {
+                        jobs: jobs
+                            .into_iter()
+                            .filter(|job| wanted.contains(&job.id))
+                            .map(|job| ipc::JobSummary {
+                                id: job.id.to_string(),
+                                name: job.name,
+                                state: job.state,
+                                total_bytes: job.total_bytes,
+                                completed_bytes: job.completed_bytes,
+                                finished_at: job.finished_at,
+                            })
+                            .collect(),
+                    })
+                }
+                ipc::Request::Open { .. } => {
+                    shell::show_main_window(&app);
+                    ipc::Ack::done().into()
+                }
+                ipc::Request::Cancel { id, .. } => match id.parse::<i64>() {
+                    Ok(id) => match state.manager.cancel(id).await {
+                        Ok(()) => ipc::Ack::done().into(),
+                        Err(_) => ipc::Ack::refused(ipc::RefusalCode::Rejected).into(),
+                    },
+                    Err(_) => ipc::Ack::refused(ipc::RefusalCode::InvalidMessage).into(),
                 },
-                video: None,
-                title: None,
-            };
-            match queue_download(&app.state::<AppState>(), spec) {
-                Ok(id) => ipc::Ack::accepted(id.to_string()),
-                Err(error) => ipc::Ack::refused(error.code()),
             }
         }
     })

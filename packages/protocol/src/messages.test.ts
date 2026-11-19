@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ackSchema, downloadRequestSchema } from "./messages";
+import { ackSchema, downloadRequestSchema, statusReplySchema } from "./messages";
 
 describe("downloadRequestSchema", () => {
   it("accepts http and https links only", () => {
@@ -54,7 +54,24 @@ describe("ackSchema", () => {
 
   it("refuses anything else", () => {
     expect(ackSchema.safeParse({ type: "ack", ok: false, code: "surprise" }).success).toBe(false);
-    expect(ackSchema.safeParse({ type: "ack", ok: true }).success).toBe(false);
+    expect(ackSchema.safeParse({ type: "ack", ok: true, id: "" }).success).toBe(false);
     expect(ackSchema.safeParse(undefined).success).toBe(false);
+  });
+});
+
+describe("statusReplySchema", () => {
+  // The exact bytes the app sends (see the ipc tests in the desktop core).
+  it("reads what the Rust side writes", () => {
+    const wire =
+      '{"type":"status","jobs":[{"id":"7","name":"a.bin","state":"active","totalBytes":10,"completedBytes":4,"finishedAt":null}]}';
+    expect(statusReplySchema.parse(JSON.parse(wire)).jobs[0]).toEqual({
+      id: "7",
+      name: "a.bin",
+      state: "active",
+      totalBytes: 10,
+      completedBytes: 4,
+      finishedAt: null,
+    });
+    expect(ackSchema.parse(JSON.parse('{"type":"ack","ok":true}'))).toEqual({ type: "ack", ok: true });
   });
 });

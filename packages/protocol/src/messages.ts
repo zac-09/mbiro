@@ -42,9 +42,56 @@ export const refusalCodeSchema = z.enum([
 ]);
 export type RefusalCode = z.infer<typeof refusalCodeSchema>;
 
-/** App to extension: the only thing that flows back. */
+/** Extension to app: how are these downloads, which I sent earlier, getting on? */
+export const statusRequestSchema = z.object({
+  type: z.literal("status"),
+  version: z.literal(PROTOCOL_VERSION),
+  ids: z.array(z.string().min(1)).max(50),
+});
+export type StatusRequest = z.infer<typeof statusRequestSchema>;
+
+/**
+ * Extension to app: bring the window forward. The native messaging host starts
+ * the app first if it is closed, which it recognises by this exact `type`.
+ */
+export const openRequestSchema = z.object({
+  type: z.literal("open"),
+  version: z.literal(PROTOCOL_VERSION),
+});
+export type OpenRequest = z.infer<typeof openRequestSchema>;
+
+/** Extension to app: the browser will download this after all; drop it. */
+export const cancelRequestSchema = z.object({
+  type: z.literal("cancel"),
+  version: z.literal(PROTOCOL_VERSION),
+  id: z.string().min(1),
+});
+export type CancelRequest = z.infer<typeof cancelRequestSchema>;
+
+export const jobStateSchema = z.enum(["queued", "active", "paused", "done", "failed"]);
+
+/** One download the extension asked about. */
+export const jobSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  state: jobStateSchema,
+  totalBytes: z.number().nonnegative(),
+  completedBytes: z.number().nonnegative(),
+  /** Seconds since 1970. */
+  finishedAt: z.number().nullable(),
+});
+export type JobSummary = z.infer<typeof jobSummarySchema>;
+
+/** App to extension: the answer to a status request. */
+export const statusReplySchema = z.object({
+  type: z.literal("status"),
+  jobs: z.array(jobSummarySchema),
+});
+export type StatusReply = z.infer<typeof statusReplySchema>;
+
+/** App to extension: yes or no. `id` names the download a download request started. */
 export const ackSchema = z.discriminatedUnion("ok", [
-  z.object({ type: z.literal("ack"), ok: z.literal(true), id: z.string().min(1) }),
+  z.object({ type: z.literal("ack"), ok: z.literal(true), id: z.string().min(1).optional() }),
   z.object({ type: z.literal("ack"), ok: z.literal(false), code: refusalCodeSchema }),
 ]);
 export type Ack = z.infer<typeof ackSchema>;

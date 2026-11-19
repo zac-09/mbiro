@@ -447,6 +447,26 @@ impl Manager {
             .map(drop)
     }
 
+    /// Takes back a download the browser will do instead: stops it, removes
+    /// it from the list, and deletes the partial file it had begun.
+    pub async fn cancel(&self, id: i64) -> DbResult<()> {
+        let Some(job) = self.load(id)? else {
+            return Ok(());
+        };
+        self.remove(id).await?;
+        if job.view.kind == Kind::File && job.view.state != JobState::Done {
+            let file = job.view.path();
+            let control = job.view.dir.join(format!("{}.aria2", job.view.name));
+            // Only a file with aria2's control file beside it is our own
+            // unfinished download; anything else is left alone.
+            if control.is_file() {
+                let _ = std::fs::remove_file(&control);
+                let _ = std::fs::remove_file(&file);
+            }
+        }
+        Ok(())
+    }
+
     pub async fn pause_all(&self) -> DbResult<()> {
         for job in self.load_all()? {
             if matches!(job.view.state, JobState::Active | JobState::Queued) {
