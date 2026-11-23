@@ -42,7 +42,9 @@ function setUp(options: { mailFails?: boolean } = {}) {
   };
   const webhook = (event: unknown, secret = SECRET) => {
     const body = JSON.stringify(event);
-    return post("/v1/payments/stub", body, { [STUB_SIGNATURE_HEADER]: stubSignature(secret, body) });
+    return post("/v1/payments/stub", body, {
+      [STUB_SIGNATURE_HEADER]: stubSignature(secret, body),
+    });
   };
   const revoked = async () => {
     const response = await service(new Request("https://licence.test/v1/revoked"));
@@ -50,11 +52,18 @@ function setUp(options: { mailFails?: boolean } = {}) {
   };
   /** The key in the most recent licence email. */
   const emailedKey = () => {
-    const key = sent.at(-1)?.text.split("\n").find((line) => /^[\w-]{40,}\.[\w-]{80,}$/.test(line));
+    const key = sent
+      .at(-1)
+      ?.text.split("\n")
+      .find((line) => /^[\w-]{40,}\.[\w-]{80,}$/.test(line));
     if (!key) throw new Error("no key in the last email");
     return key;
   };
-  const key = issueKey(signer, { email: "buyer@example.com", plan: "standard", issued: "2026-11-23" });
+  const key = issueKey(signer, {
+    email: "buyer@example.com",
+    plan: "standard",
+    issued: "2026-11-23",
+  });
   return { signer, service, post, webhook, revoked, emailedKey, sent, state, key };
 }
 
@@ -63,11 +72,13 @@ describe("keys", () => {
     const pem = throwaway();
     const signer = loadSigner(pem);
     const key = issueKey(signer, { email: "a@b.co", plan: "standard", issued: "2026-11-23" });
-    const [payload, signature] = key.split(".").map((part) => Buffer.from(part ?? "", "base64url"));
+    const [first = "", second = ""] = key.split(".");
+    const payload = Buffer.from(first, "base64url");
+    const signature = Buffer.from(second, "base64url");
     // Exactly the bytes scripts/issue-licence.sh signs, in the same field order.
-    expect(payload?.toString()).toBe('{"email":"a@b.co","plan":"standard","issued":"2026-11-23"}');
+    expect(payload.toString()).toBe('{"email":"a@b.co","plan":"standard","issued":"2026-11-23"}');
     expect(signature).toHaveLength(64);
-    expect(verifySignature(null, payload!, createPublicKey(pem), signature!)).toBe(true);
+    expect(verifySignature(null, payload, createPublicKey(pem), signature)).toBe(true);
     expect(Buffer.from(signer.publicKey, "base64")).toHaveLength(32);
   });
 
@@ -76,7 +87,12 @@ describe("keys", () => {
     const key = issueKey(signer, { email: "a@b.co", plan: "standard", issued: "2026-11-23" });
     expect(readKey(signer, ` ${key.slice(0, 30)}\n${key.slice(30)} `)?.email).toBe("a@b.co");
     expect(readKey(loadSigner(throwaway()), key)).toBeNull();
-    expect(readKey(signer, key.replace(/^./, (c) => (c === "A" ? "B" : "A")))).toBeNull();
+    expect(
+      readKey(
+        signer,
+        key.replace(/^./, (c) => (c === "A" ? "B" : "A")),
+      ),
+    ).toBeNull();
     expect(readKey(signer, "not a key")).toBeNull();
     // Signed by us, but not a licence.
     expect(readKey(signer, signer.sign('{"licence":"x","device":"y"}'))).toBeNull();
@@ -144,7 +160,9 @@ describe("activation", () => {
       ["POST", "/v1/revoked"],
       ["POST", "/v1/payments/unknown"],
     ] as const) {
-      expect((await service(new Request(`https://licence.test${path}`, { method }))).status).toBe(404);
+      expect((await service(new Request(`https://licence.test${path}`, { method }))).status).toBe(
+        404,
+      );
     }
   });
 });
@@ -207,7 +225,9 @@ describe("purchases and refunds", () => {
     const { webhook, post, sent } = setUp();
     expect((await webhook(bought, "some-other-secret-value")).status).toBe(401);
     expect((await post("/v1/payments/stub", bought)).status).toBe(401);
-    expect((await webhook({ kind: "purchase", order: "1", email: "not an email" })).status).toBe(401);
+    expect((await webhook({ kind: "purchase", order: "1", email: "not an email" })).status).toBe(
+      401,
+    );
     expect(sent).toHaveLength(0);
   });
 });

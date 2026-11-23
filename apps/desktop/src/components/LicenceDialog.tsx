@@ -11,11 +11,13 @@ interface Props {
   onActivated: (status: LicenceStatus) => void;
 }
 
-/** Where a licence key is pasted. The core checks it; nothing leaves this Mac. */
+/** Where a licence key is pasted. The core checks it and activates it. */
 export function LicenceDialog({ onClose, onActivated }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [key, setKey] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Activation asks the licence server, which can take a few seconds.
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     dialog.current?.showModal();
@@ -23,15 +25,19 @@ export function LicenceDialog({ onClose, onActivated }: Props) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!key.trim()) return;
+    if (!key.trim() || busy) return;
     setError(null);
+    setBusy(true);
     api
       .enterLicence(key)
       .then((status) => {
         onActivated(status);
         onClose();
       })
-      .catch((reason: unknown) => setError(String(reason)));
+      .catch((reason: unknown) => {
+        setError(String(reason));
+        setBusy(false);
+      });
   };
 
   return (
@@ -77,8 +83,8 @@ export function LicenceDialog({ onClose, onActivated }: Props) {
           >
             {t.cancel}
           </button>
-          <button type="submit" className={`${primaryButton} px-7`}>
-            {t.activate}
+          <button type="submit" disabled={busy} className={`${primaryButton} px-7`}>
+            {busy ? t.activating : t.activate}
           </button>
         </div>
       </form>

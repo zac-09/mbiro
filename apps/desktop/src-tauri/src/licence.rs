@@ -1,4 +1,4 @@
-//! The trial and the licence key, both checked on this Mac with no network.
+//! The trial and the licence key, both worked out on this Mac.
 //!
 //! A licence key is a small JSON payload and an Ed25519 signature of it, each
 //! in URL-safe base64, joined by a dot. The app holds only the public key: it
@@ -8,13 +8,16 @@
 //! that, without a licence: one download at a time, two connections, and no
 //! video downloads.
 //!
-//! Not here yet (M4): the activation call that limits a key to three Macs,
-//! and the weekly list of refunded keys.
+//! When the build names a licence server, a key also needs an activation
+//! receipt: the server's signed word that this Mac holds one of the key's
+//! three places. The receipt and the list of refunded keys are fetched by
+//! `activation.rs`; this file only checks them, with no network.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// The key licences are checked against, as standard base64 of its 32 bytes.
 /// `None` until the owner generates the real pair with
@@ -48,11 +51,9 @@ pub enum KeyError {
     BadSignature,
 }
 
-/// Checks a key against a public key and returns what it says.
-pub fn verify(key: &str, public_key_b64: &str) -> Result<Licence, KeyError> {
-    // Keys get pasted from emails: spaces and line breaks are forgiven.
-    let key: String = key.chars().filter(|c| !c.is_whitespace()).collect();
-    let (payload, signature) = key.split_once('.').ok_or(KeyError::Malformed)?;
+/// Checks `<payload>.<signature>` against a public key and returns the payload.
+fn signed_payload(signed: &str, public_key_b64: &str) -> Result<Vec<u8>, KeyError> {
+    let (payload, signature) = signed.split_once('.').ok_or(KeyError::Malformed)?;
     let payload = URL_SAFE_NO_PAD
         .decode(payload)
         .map_err(|_| KeyError::Malformed)?;
@@ -70,11 +71,49 @@ pub fn verify(key: &str, public_key_b64: &str) -> Result<Licence, KeyError> {
     public
         .verify_strict(&payload, &signature)
         .map_err(|_| KeyError::BadSignature)?;
+    Ok(payload)
+}
 
+/// A key as stored and sent: keys get pasted from emails, so spaces and line
+/// breaks are forgiven.
+pub fn tidy(key: &str) -> String {
+    key.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// Checks a key against a public key and returns what it says.
+pub fn verify(key: &str, public_key_b64: &str) -> Result<Licence, KeyError> {
+    let payload = signed_payload(&tidy(key), public_key_b64)?;
     // Only now is the payload trusted enough to read.
     let licence: Licence = serde_json::from_slice(&payload).map_err(|_| KeyError::Malformed)?;
     let sane = !licence.email.is_empty() && licence.email.len() <= 320 && licence.plan.len() <= 64;
     sane.then_some(licence).ok_or(KeyError::Malformed)
+}
+
+/// How a licence is named outside the key itself: in receipts and in the list
+/// of refunded keys. The licence service computes the same value
+/// (`keyId` in services/licence/src/keys.ts).
+pub fn key_id(key: &str) -> String {
+    Sha256::digest(tidy(key).as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// What an activation receipt says. Its fields are not a licence's, so one
+/// can never pass for the other.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Receipt {
+    licence: String,
+    device: String,
+}
+
+/// Whether `receipt` is the server's word that `key` may run on `device`.
+pub fn receipt_covers(receipt: &str, public_key_b64: &str, key: &str, device: &str) -> bool {
+    signed_payload(receipt.trim(), public_key_b64)
+        .ok()
+        .and_then(|payload| serde_json::from_slice::<Receipt>(&payload).ok())
+        .is_some_and(|said| said.licence == key_id(key) && said.device == device)
 }
 
 /// Where the app stands, as the window shows it.
@@ -108,20 +147,50 @@ pub struct Record {
     /// buy more trial: time is taken to be at least this.
     pub last_seen: Option<i64>,
     pub key: Option<String>,
+    /// The server's receipt for `key` on this Mac.
+    pub receipt: Option<String>,
+    /// Ids of refunded licences, as last fetched.
+    pub revoked: Vec<String>,
+}
+
+/// Whether a key needs the licence server's receipt as well as our signature.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Activation<'a> {
+    /// This build names no licence server: a valid key is enough.
+    NotRequired,
+    /// A receipt for this Mac is needed. The id is this Mac's, and is empty
+    /// if it could not be read, which no receipt matches.
+    Required(&'a str),
+}
+
+/// What a stored key is checked against.
+#[derive(Debug, Clone, Copy)]
+pub struct Check<'a> {
+    pub public_key: Option<&'a str>,
+    pub activation: Activation<'a>,
 }
 
 /// Works out the status at `now`, and what to remember afterwards.
-pub fn evaluate(record: &Record, now: i64, public_key: Option<&str>) -> (Status, Record) {
+pub fn evaluate(record: &Record, now: i64, check: Check<'_>) -> (Status, Record) {
     let now = now.max(record.last_seen.unwrap_or(0));
     let started = record.trial_started.unwrap_or(now);
     let next = Record {
         trial_started: Some(started),
         last_seen: Some(now),
-        key: record.key.clone(),
+        ..record.clone()
     };
 
-    let licence = match (&record.key, public_key) {
-        (Some(key), Some(public)) => verify(key, public).ok(),
+    let licence = match (&record.key, check.public_key) {
+        (Some(key), Some(public)) => verify(key, public).ok().filter(|_| {
+            let activated = match check.activation {
+                Activation::NotRequired => true,
+                Activation::Required(device) => record
+                    .receipt
+                    .as_deref()
+                    .is_some_and(|receipt| receipt_covers(receipt, public, key, device)),
+            };
+            activated && !record.revoked.contains(&key_id(key))
+        }),
         _ => None,
     };
     let status = match licence {
@@ -155,6 +224,14 @@ mod tests {
         let public =
             base64::engine::general_purpose::STANDARD.encode(signing.verifying_key().to_bytes());
         (signing, public)
+    }
+
+    /// A check with no licence server in the build.
+    fn offline(public_key: Option<&str>) -> Check<'_> {
+        Check {
+            public_key,
+            activation: Activation::NotRequired,
+        }
     }
 
     fn issue(signing: &SigningKey, payload: &str) -> String {
@@ -231,11 +308,11 @@ mod tests {
     #[test]
     fn the_trial_counts_down_from_first_launch_and_ends() {
         let start = 1_800_000_000;
-        let (status, record) = evaluate(&Record::default(), start, None);
+        let (status, record) = evaluate(&Record::default(), start, offline(None));
         assert_eq!(status, Status::Trial { days_left: 14 });
         assert_eq!(record.trial_started, Some(start));
 
-        let at = |seconds: i64| evaluate(&record, start + seconds, None).0;
+        let at = |seconds: i64| evaluate(&record, start + seconds, offline(None)).0;
         assert_eq!(at(DAY - 1), Status::Trial { days_left: 14 });
         assert_eq!(at(DAY), Status::Trial { days_left: 13 });
         assert_eq!(at(13 * DAY + 1), Status::Trial { days_left: 1 });
@@ -247,11 +324,14 @@ mod tests {
     #[test]
     fn setting_the_clock_back_does_not_extend_the_trial() {
         let start = 1_800_000_000;
-        let (_, record) = evaluate(&Record::default(), start, None);
-        let (status, record) = evaluate(&record, start + 20 * DAY, None);
+        let (_, record) = evaluate(&Record::default(), start, offline(None));
+        let (status, record) = evaluate(&record, start + 20 * DAY, offline(None));
         assert_eq!(status, Status::Expired);
         // The clock goes back to the first day; the app remembers better.
-        assert_eq!(evaluate(&record, start + 60, None).0, Status::Expired);
+        assert_eq!(
+            evaluate(&record, start + 60, offline(None)).0,
+            Status::Expired
+        );
     }
 
     #[test]
@@ -262,8 +342,9 @@ mod tests {
             trial_started: Some(start),
             last_seen: Some(start),
             key: Some(issue(&signing, PAYLOAD)),
+            ..Record::default()
         };
-        let (status, _) = evaluate(&record, start + 400 * DAY, Some(&public));
+        let (status, _) = evaluate(&record, start + 400 * DAY, offline(Some(&public)));
         assert_eq!(
             status,
             Status::Licensed {
@@ -273,7 +354,7 @@ mod tests {
         );
         // Without a public key in the build, a stored key cannot count.
         assert_eq!(
-            evaluate(&record, start + 400 * DAY, None).0,
+            evaluate(&record, start + 400 * DAY, offline(None)).0,
             Status::Expired
         );
         // A stored key that is not ours leaves the trial rules in force.
@@ -282,8 +363,110 @@ mod tests {
             ..record
         };
         assert_eq!(
-            evaluate(&bad, start + DAY, Some(&public)).0,
+            evaluate(&bad, start + DAY, offline(Some(&public))).0,
             Status::Trial { days_left: 13 }
         );
+    }
+
+    const DEVICE: &str = "this-mac";
+
+    fn receipt(signing: &SigningKey, key: &str, device: &str) -> String {
+        let payload = format!(r#"{{"licence":"{}","device":"{device}"}}"#, key_id(key));
+        issue(signing, &payload)
+    }
+
+    #[test]
+    fn a_key_has_one_id_however_it_was_pasted() {
+        let (signing, _) = test_pair();
+        let key = issue(&signing, PAYLOAD);
+        let wrapped = format!(" {}\n{} ", &key[..40], &key[40..]);
+        assert_eq!(key_id(&wrapped), key_id(&key));
+        assert_eq!(key_id(&key).len(), 64);
+        // The value the licence service computes for the same text.
+        assert_eq!(
+            key_id("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn with_a_licence_server_a_key_needs_a_receipt_for_this_mac() {
+        let (signing, public) = test_pair();
+        let key = issue(&signing, PAYLOAD);
+        let start = 1_800_000_000;
+        let check = Check {
+            public_key: Some(&public),
+            activation: Activation::Required(DEVICE),
+        };
+        let with = |receipt: Option<String>| {
+            let record = Record {
+                trial_started: Some(start),
+                last_seen: Some(start),
+                key: Some(key.clone()),
+                receipt,
+                revoked: Vec::new(),
+            };
+            evaluate(&record, start + 400 * DAY, check).0
+        };
+        let licensed = |status: Status| matches!(status, Status::Licensed { .. });
+
+        assert!(licensed(with(Some(receipt(&signing, &key, DEVICE)))));
+        // No receipt, one for another Mac, one for another key, a forged one.
+        assert_eq!(with(None), Status::Expired);
+        assert_eq!(
+            with(Some(receipt(&signing, &key, "another-mac"))),
+            Status::Expired
+        );
+        let other_key = issue(&signing, &PAYLOAD.replace("buyer", "other"));
+        assert_eq!(
+            with(Some(receipt(&signing, &other_key, DEVICE))),
+            Status::Expired
+        );
+        let forger = SigningKey::from_bytes(&[9u8; 32]);
+        assert_eq!(with(Some(receipt(&forger, &key, DEVICE))), Status::Expired);
+        // A licence key is not a receipt, and a receipt is not a licence key.
+        assert_eq!(with(Some(key.clone())), Status::Expired);
+        assert_eq!(
+            verify(&receipt(&signing, &key, DEVICE), &public),
+            Err(KeyError::Malformed)
+        );
+        // A Mac whose id could not be read matches no receipt.
+        let unknown = Check {
+            activation: Activation::Required(""),
+            ..check
+        };
+        let record = Record {
+            key: Some(key.clone()),
+            receipt: Some(receipt(&signing, &key, DEVICE)),
+            ..Record::default()
+        };
+        assert!(!licensed(evaluate(&record, start, unknown).0));
+    }
+
+    #[test]
+    fn a_refunded_key_stops_counting() {
+        let (signing, public) = test_pair();
+        let key = issue(&signing, PAYLOAD);
+        let start = 1_800_000_000;
+        let record = Record {
+            trial_started: Some(start),
+            last_seen: Some(start),
+            key: Some(key.clone()),
+            receipt: None,
+            revoked: vec!["someone-else".into(), key_id(&key)],
+        };
+        let (status, next) = evaluate(&record, start + 20 * DAY, offline(Some(&public)));
+        assert_eq!(status, Status::Expired);
+        // The list is kept for next time.
+        assert_eq!(next.revoked, record.revoked);
+
+        let cleared = Record {
+            revoked: vec!["someone-else".into()],
+            ..record
+        };
+        assert!(matches!(
+            evaluate(&cleared, start + 20 * DAY, offline(Some(&public))).0,
+            Status::Licensed { .. }
+        ));
     }
 }

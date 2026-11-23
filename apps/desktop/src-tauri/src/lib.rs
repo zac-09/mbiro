@@ -1,6 +1,7 @@
 //! The Rust core. It owns the engines and the job list; the window only sends
 //! commands and renders the events sent from here.
 
+pub mod activation;
 mod browsers;
 mod clipboard;
 mod constants;
@@ -52,6 +53,10 @@ struct AppState {
     copied_link: Mutex<Option<String>>,
     /// Trial or licence, as last worked out.
     licence: Mutex<licence::Status>,
+    /// The licence service this run talks to, if the build names one.
+    licence_server: Option<String>,
+    /// What stands for this Mac at the licence service.
+    device: Option<String>,
 }
 
 impl AppState {
@@ -337,27 +342,47 @@ fn browser_status(app: AppHandle) -> Vec<browsers::BrowserStatus> {
 const TRIAL_STARTED_KEY: &str = "trial_started";
 const LAST_SEEN_KEY: &str = "last_seen";
 const LICENCE_KEY: &str = "licence";
+const RECEIPT_KEY: &str = "licence_receipt";
+/// The ids of refunded licences, as a JSON list, and when it was last fetched.
+const REVOKED_KEY: &str = "licences_revoked";
+const REVOKED_CHECKED_KEY: &str = "licences_revoked_checked";
+
+fn now_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
+impl AppState {
+    /// What a stored key must pass: our signature, and with a licence service
+    /// in the build, its receipt for this Mac.
+    fn licence_check(&self) -> licence::Check<'_> {
+        licence::Check {
+            public_key: licence::PUBLIC_KEY,
+            activation: match &self.licence_server {
+                None => licence::Activation::NotRequired,
+                Some(_) => licence::Activation::Required(self.device.as_deref().unwrap_or("")),
+            },
+        }
+    }
+}
 
 /// Works out trial or licence afresh, remembers what needs remembering, and
 /// switches the after-trial limits to match.
 fn refresh_licence(state: &AppState) -> licence::Status {
     let manager = &state.manager;
-    let number = |key| {
-        manager
-            .stored(key)
-            .ok()
-            .flatten()
-            .and_then(|text| text.parse::<i64>().ok())
-    };
+    let text = |key| manager.stored(key).ok().flatten();
+    let number = |key| text(key).and_then(|text| text.parse::<i64>().ok());
     let record = licence::Record {
         trial_started: number(TRIAL_STARTED_KEY),
         last_seen: number(LAST_SEEN_KEY),
-        key: manager.stored(LICENCE_KEY).ok().flatten(),
+        key: text(LICENCE_KEY),
+        receipt: text(RECEIPT_KEY),
+        revoked: text(REVOKED_KEY)
+            .and_then(|list| serde_json::from_str(&list).ok())
+            .unwrap_or_default(),
     };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
-    let (status, next) = licence::evaluate(&record, now, licence::PUBLIC_KEY);
+    let (status, next) = licence::evaluate(&record, now_seconds(), state.licence_check());
     if next.trial_started != record.trial_started {
         let _ = manager.store(
             TRIAL_STARTED_KEY,
@@ -380,23 +405,96 @@ fn licence_status(state: State<'_, AppState>) -> licence::Status {
     refresh_licence(&state)
 }
 
-/// Checks a pasted key and, if it is ours, keeps it.
+/// Checks a pasted key and, if it is ours, keeps it. With a licence service
+/// in the build, the key must also get a place for this Mac there first.
 #[tauri::command]
-fn enter_licence(state: State<'_, AppState>, key: String) -> Result<licence::Status, String> {
+async fn enter_licence(state: State<'_, AppState>, key: String) -> Result<licence::Status, String> {
     let public = licence::PUBLIC_KEY.ok_or(strings::LICENCE_UNAVAILABLE)?;
     licence::verify(&key, public).map_err(|error| match error {
         licence::KeyError::NoPublicKey => strings::LICENCE_UNAVAILABLE.to_owned(),
         _ => strings::LICENCE_INVALID.to_owned(),
     })?;
-    let tidy: String = key.chars().filter(|c| !c.is_whitespace()).collect();
+    let tidy = licence::tidy(&key);
+
+    let receipt = match &state.licence_server {
+        None => None,
+        Some(server) => {
+            let device = state.device.as_deref().ok_or(strings::LICENCE_NO_DEVICE)?;
+            let receipt = activation::activate(server, &tidy, device)
+                .await
+                .map_err(|error| match error {
+                    activation::ActivationError::Offline => strings::LICENCE_OFFLINE,
+                    activation::ActivationError::InvalidKey => strings::LICENCE_INVALID,
+                    activation::ActivationError::Revoked => strings::LICENCE_REVOKED,
+                    activation::ActivationError::DeviceLimit => strings::LICENCE_DEVICE_LIMIT,
+                    activation::ActivationError::Service => strings::LICENCE_SERVICE,
+                })?;
+            // A receipt we cannot check is no receipt: the answer must be the
+            // real service's, for this key and this Mac.
+            if !licence::receipt_covers(&receipt, public, &tidy, device) {
+                return Err(strings::LICENCE_SERVICE.to_owned());
+            }
+            Some(receipt)
+        }
+    };
     state.manager.store(LICENCE_KEY, Some(&tidy))?;
+    state.manager.store(RECEIPT_KEY, receipt.as_deref())?;
     Ok(refresh_licence(&state))
 }
 
+/// Forgets the licence on this Mac and gives its place back, so the key can
+/// be used on another.
 #[tauri::command]
-fn remove_licence(state: State<'_, AppState>) -> Result<licence::Status, String> {
+async fn remove_licence(state: State<'_, AppState>) -> Result<licence::Status, String> {
+    let key = state.manager.stored(LICENCE_KEY)?;
+    if let (Some(server), Some(device), Some(key)) = (&state.licence_server, &state.device, &key) {
+        // The place must be free before the key goes: once it is forgotten
+        // here there is no way to ask again.
+        match activation::deactivate(server, key, device).await {
+            // A key the service no longer honours holds no place to give back.
+            Ok(())
+            | Err(activation::ActivationError::InvalidKey | activation::ActivationError::Revoked) =>
+                {}
+            Err(activation::ActivationError::Offline) => {
+                return Err(strings::LICENCE_REMOVE_OFFLINE.to_owned())
+            }
+            Err(_) => return Err(strings::LICENCE_SERVICE.to_owned()),
+        }
+    }
     state.manager.store(LICENCE_KEY, None)?;
+    state.manager.store(RECEIPT_KEY, None)?;
     Ok(refresh_licence(&state))
+}
+
+/// Once a week, while a key is stored, fetches the list of refunded keys.
+/// With no licence service in the build, or no key, nothing is ever sent.
+async fn watch_for_refunds(app: AppHandle) {
+    const WEEK: i64 = 7 * 24 * 60 * 60;
+    tokio::time::sleep(Duration::from_secs(90)).await;
+    loop {
+        let state = app.state::<AppState>();
+        let manager = &state.manager;
+        let has_key = manager.stored(LICENCE_KEY).ok().flatten().is_some();
+        let checked = manager
+            .stored(REVOKED_CHECKED_KEY)
+            .ok()
+            .flatten()
+            .and_then(|text| text.parse::<i64>().ok())
+            .unwrap_or(0);
+        let now = now_seconds();
+        if let (Some(server), true, true) = (&state.licence_server, has_key, now - checked >= WEEK)
+        {
+            // A failure (offline, say) is simply tried again in an hour.
+            if let Ok(revoked) = activation::revoked(server).await {
+                if let Ok(list) = serde_json::to_string(&revoked) {
+                    let _ = manager.store(REVOKED_KEY, Some(&list));
+                    let _ = manager.store(REVOKED_CHECKED_KEY, Some(&now.to_string()));
+                    refresh_licence(&state);
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(60 * 60)).await;
+    }
 }
 
 /// What the add dialog starts from.
@@ -818,6 +916,7 @@ pub fn run() {
                 retry_delay: NETWORK_RETRY_DELAY,
             };
             let manager = Manager::open(config, engine, video_engine_if_ready(&tools_dir))?;
+            let licence_server = activation::server();
             app.manage(AppState {
                 manager,
                 health,
@@ -829,6 +928,11 @@ pub fn run() {
                 licence: Mutex::new(licence::Status::Trial {
                     days_left: licence::TRIAL_DAYS,
                 }),
+                device: licence_server
+                    .is_some()
+                    .then(activation::device_id)
+                    .flatten(),
+                licence_server,
             });
             // The trial clock starts, or carries on, from the first launch.
             refresh_licence(&app.state::<AppState>());
@@ -836,6 +940,7 @@ pub fn run() {
             shell::setup(app)?;
             start_browser_integration(app.handle());
             tauri::async_runtime::spawn(keep_yt_dlp_fresh(app.handle().clone()));
+            tauri::async_runtime::spawn(watch_for_refunds(app.handle().clone()));
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 handle.state::<AppState>().manager.apply_speed_limit().await;

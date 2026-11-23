@@ -44,4 +44,15 @@ pub const VIDEO_FAIL_OTHER: &str = "The video could not be downloaded. Retry, or
 pub const LICENCE_UNAVAILABLE: &str = "Licence keys cannot be checked in this build yet.";
 pub const LICENCE_INVALID: &str =
     "That key is not valid. Copy all of it again from your licence email.";
+pub const LICENCE_OFFLINE: &str =
+    "The licence server could not be reached. Check your connection and try again.";
+pub const LICENCE_DEVICE_LIMIT: &str =
+    "This key is already in use on 3 Macs. Choose Remove Licence in Settings on one of them, then try again.";
+pub const LICENCE_REVOKED: &str = "This licence was refunded and no longer works.";
+pub const LICENCE_SERVICE: &str =
+    "The licence server gave an answer this app does not understand. Try again later.";
+pub const LICENCE_NO_DEVICE: &str =
+    "This Mac could not be identified, so the key cannot be activated.";
+pub const LICENCE_REMOVE_OFFLINE: &str =
+    "The licence server could not be reached, so this Mac's place on the key cannot be freed. Check your connection and try again.";
 pub const TRIAL_ENDED_VIDEO: &str = "The trial has ended. Video downloads need a licence.";
