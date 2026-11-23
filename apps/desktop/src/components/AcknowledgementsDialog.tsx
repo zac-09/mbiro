@@ -53,6 +53,43 @@ function Entry({ entry }: { entry: Acknowledgement }) {
   );
 }
 
+/** Every compiled-in library and its licence: one long text, fetched when asked for. */
+function Libraries() {
+  const [text, setText] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const toggle = () => {
+    if (!open && text === null) void api.libraryLicences().then(setText);
+    setOpen(!open);
+  };
+
+  return (
+    <section className="flex flex-col gap-2 border-t border-rule-strong pt-3">
+      <h2 className={`${fieldLabel} m-0 font-normal`}>{t.libraries}</h2>
+      <span className="pt-[14px] font-display text-[21px] font-semibold tracking-[0.06em]">
+        {t.librariesName}
+      </span>
+      <p className="m-0 text-[12.5px] leading-[1.55] text-soft">{t.librariesBody}</p>
+      <button
+        type="button"
+        className={`${secondaryButton} self-start`}
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        {open ? t.hideLibraries : t.showLibraries}
+      </button>
+      {open && text !== null && (
+        <pre
+          tabIndex={0}
+          className="m-0 max-h-[320px] overflow-auto rounded-[2px] border border-border bg-field p-3 font-mono text-[11.5px] leading-[1.5] whitespace-pre-wrap text-soft select-text"
+        >
+          {text}
+        </pre>
+      )}
+    </section>
+  );
+}
+
 /** The open-source work the app uses, with each licence. Opened from Settings. */
 export function AcknowledgementsDialog({ onClose }: { onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -96,6 +133,7 @@ export function AcknowledgementsDialog({ onClose }: { onClose: () => void }) {
               </section>
             ),
         )}
+        <Libraries />
         <div className="flex justify-end border-t border-rule-strong pt-4">
           <button type="button" className={`${primaryButton} px-7`} onClick={onClose}>
             {t.done}

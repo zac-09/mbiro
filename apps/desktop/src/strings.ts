@@ -101,6 +101,12 @@ export const strings = {
     fetched: "FETCHED WHEN YOU SWITCH ON VIDEO DOWNLOADS",
     source: "SOURCE",
     licence: "LICENCE",
+    libraries: "LIBRARIES COMPILED INTO THE APP",
+    librariesName: "RUST AND JAVASCRIPT LIBRARIES",
+    librariesBody:
+      "The app is built from several hundred open-source libraries, most under the MIT or Apache licences. The list names each one with its licence, followed by the licence texts.",
+    showLibraries: "SHOW LIST AND LICENCES",
+    hideLibraries: "HIDE LIST AND LICENCES",
     showText: "SHOW LICENCE",
     hideText: "HIDE LICENCE",
     done: "DONE",

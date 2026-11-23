@@ -797,6 +797,13 @@ fn acknowledgements() -> Vec<acknowledgements::Acknowledgement> {
     acknowledgements::all()
 }
 
+/// The licences of every library compiled into the app. Large, so the window
+/// asks for it only when the user wants to read it.
+#[tauri::command]
+fn library_licences() -> &'static str {
+    acknowledgements::LIBRARIES
+}
+
 #[tauri::command]
 fn tools_status(state: State<'_, AppState>) -> Vec<ToolStatus> {
     let root = &state.tools_dir;
@@ -1099,6 +1106,7 @@ pub fn run() {
             resume_all,
             show_file,
             acknowledgements,
+            library_licences,
             open_main_window,
             copied_link,
             use_copied_link,

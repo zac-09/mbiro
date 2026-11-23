@@ -26,6 +26,10 @@ const ARIA2_OPENSSL_EXCEPTION: &str = include_str!("../licences/aria2-LICENSE.Op
 const BARLOW_LICENCE: &str = include_str!("../licences/barlow-condensed-OFL.txt");
 const PLEX_LICENCE: &str = include_str!("../licences/ibm-plex-mono-OFL.txt");
 
+/// Every library compiled into the app, with its licence. Written by
+/// `scripts/gather-licences.mjs`; CI fails if it is out of date.
+pub const LIBRARIES: &str = include_str!("../licences/THIRD-PARTY.txt");
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Acknowledgement {
@@ -172,6 +176,24 @@ mod tests {
                 .unwrap_or_default()
                 .contains("SIL OPEN FONT LICENSE"));
         }
+    }
+
+    #[test]
+    fn the_library_list_names_what_the_app_is_built_on() {
+        for needle in [
+            "RUST LIBRARIES (",
+            "JAVASCRIPT LIBRARIES (",
+            "  tauri 2.",
+            "  ed25519-dalek ",
+            "  react ",
+            "Apache License",
+            "Permission is hereby granted, free of charge",
+        ] {
+            assert!(LIBRARIES.contains(needle), "missing {needle:?}");
+        }
+        // Tools for building and testing are not in the app, so not in the list.
+        assert!(!LIBRARIES.contains("  vitest "));
+        assert!(!LIBRARIES.contains("  tauri-build "));
     }
 
     #[test]

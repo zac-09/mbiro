@@ -181,6 +181,7 @@ export const api = {
   enterLicence: (key: string) => invoke<LicenceStatus>("enter_licence", { key }),
   removeLicence: () => invoke<LicenceStatus>("remove_licence"),
   acknowledgements: () => invoke<Acknowledgement[]>("acknowledgements"),
+  libraryLicences: () => invoke<string>("library_licences"),
   updateStatus: () => invoke<UpdateStatus>("update_status"),
   checkForUpdate: () => invoke<UpdateStatus>("check_for_update"),
   installUpdate: () => invoke<null>("install_update"),

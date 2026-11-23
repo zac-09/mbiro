@@ -72,6 +72,10 @@ jobs:
       - name: Build the native messaging host
         run: scripts/build-nm-host.sh
 
+      # Fails if a dependency changed without its licence being gathered.
+      - name: Check the library licence list
+        run: node scripts/gather-licences.mjs --check
+
       # The core embeds the built window, so it must exist before Rust compiles.
       - name: Build the window
         run: pnpm --filter @mbiro/desktop build:ui
