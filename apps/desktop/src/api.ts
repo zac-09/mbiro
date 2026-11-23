@@ -130,6 +130,20 @@ export type LicenceStatus =
   | { state: "trial"; daysLeft: number }
   | { state: "expired" };
 
+/** Mirrors `UpdateStatus` in src-tauri/src/lib.rs. */
+export interface UpdateStatus {
+  /** False until the build names an update key and a manifest. */
+  configured: boolean;
+  current: string;
+  available: { version: string; notes: string | null } | null;
+  checkedAt: number | null;
+}
+
+export interface UpdateProgress {
+  received: number;
+  total: number | null;
+}
+
 export interface AddDefaults {
   dir: string;
   connections: number;
@@ -140,6 +154,8 @@ export const SNAPSHOT_EVENT = "downloads:snapshot";
 export const TOOL_PROGRESS_EVENT = "tools:progress";
 export const COPIED_LINK_EVENT = "clipboard:link";
 export const OPEN_ADD_EVENT = "add:open";
+export const UPDATE_EVENT = "update:status";
+export const UPDATE_PROGRESS_EVENT = "update:progress";
 
 /** Every command the window may send to the core. */
 export const api = {
@@ -151,6 +167,9 @@ export const api = {
   licenceStatus: () => invoke<LicenceStatus>("licence_status"),
   enterLicence: (key: string) => invoke<LicenceStatus>("enter_licence", { key }),
   removeLicence: () => invoke<LicenceStatus>("remove_licence"),
+  updateStatus: () => invoke<UpdateStatus>("update_status"),
+  checkForUpdate: () => invoke<UpdateStatus>("check_for_update"),
+  installUpdate: () => invoke<null>("install_update"),
   addDefaults: () => invoke<AddDefaults>("add_defaults"),
   add: (url: string, dir: string | null, connections: number) =>
     invoke<number>("add_download", { url, dir, connections }),

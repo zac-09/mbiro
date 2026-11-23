@@ -3,6 +3,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   TOOL_PROGRESS_EVENT,
+  UPDATE_EVENT,
+  UPDATE_PROGRESS_EVENT,
   api,
   type BrowserStatus,
   type Category,
@@ -10,6 +12,8 @@ import {
   type Settings,
   type ToolProgress,
   type ToolStatus,
+  type UpdateProgress,
+  type UpdateStatus,
 } from "../api";
 import { clock } from "../format";
 import { strings } from "../strings";
@@ -153,6 +157,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [licence, setLicence] = useState<LicenceStatus | null>(null);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [updateWork, setUpdateWork] = useState<"checking" | "installing" | null>(null);
+  const [installed, setInstalled] = useState<UpdateProgress | null>(null);
 
   useEffect(() => {
     dialog.current?.showModal();
@@ -161,10 +168,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     void api.browserStatus().then(setBrowsers);
     void api.licenceStatus().then(setLicence);
     void api.toolsStatus().then(setTools);
-    const unlisten = listen<ToolProgress>(TOOL_PROGRESS_EVENT, (event) =>
-      setFetching(event.payload),
-    );
-    return () => void unlisten.then((stop) => stop());
+    void api.updateStatus().then(setUpdate);
+    const unlisten = [
+      listen<ToolProgress>(TOOL_PROGRESS_EVENT, (event) => setFetching(event.payload)),
+      listen<UpdateStatus>(UPDATE_EVENT, (event) => setUpdate(event.payload)),
+      listen<UpdateProgress>(UPDATE_PROGRESS_EVENT, (event) => setInstalled(event.payload)),
+    ];
+    return () => unlisten.forEach((pending) => void pending.then((stop) => stop()));
   }, []);
 
   /** Saves a change at once; the core answers with the settings as it stored them. */
@@ -188,6 +198,27 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       categories: settings.categories.map((category, at) =>
         at === index ? { ...category, ...patch } : category,
       ),
+    });
+  };
+
+  const checkForUpdate = () => {
+    setError(null);
+    setUpdateWork("checking");
+    api
+      .checkForUpdate()
+      .then(setUpdate)
+      .catch((reason: unknown) => setError(String(reason)))
+      .finally(() => setUpdateWork(null));
+  };
+
+  /** On success the app restarts, so there is nothing to do afterwards. */
+  const installUpdate = () => {
+    setError(null);
+    setInstalled(null);
+    setUpdateWork("installing");
+    api.installUpdate().catch((reason: unknown) => {
+      setError(String(reason));
+      setUpdateWork(null);
     });
   };
 
@@ -423,6 +454,59 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </button>
           )}
         </Section>
+
+        {update && (
+          <Section title={strings.update.section}>
+            <Row
+              name={strings.update.version(update.current)}
+              help={
+                !update.configured
+                  ? strings.update.off
+                  : update.available
+                    ? strings.update.installHelp
+                    : update.checkedAt
+                      ? strings.update.checked(when(update.checkedAt))
+                      : strings.update.neverChecked
+              }
+            >
+              {update.configured && (
+                <>
+                  <Status
+                    good={!update.available}
+                    label={
+                      update.available
+                        ? strings.update.available(update.available.version)
+                        : strings.update.upToDate
+                    }
+                  />
+                  <button
+                    type="button"
+                    className={secondaryButton}
+                    disabled={updateWork !== null}
+                    onClick={update.available ? installUpdate : checkForUpdate}
+                  >
+                    {updateWork === "installing"
+                      ? strings.update.installing(
+                          installed?.total
+                            ? Math.floor((installed.received / installed.total) * 100)
+                            : null,
+                        )
+                      : updateWork === "checking"
+                        ? strings.update.checking
+                        : update.available
+                          ? strings.update.install
+                          : strings.update.check}
+                  </button>
+                </>
+              )}
+            </Row>
+            {update.available?.notes && (
+              <p className="m-0 text-[12px] leading-[1.5] whitespace-pre-line text-muted select-text">
+                {update.available.notes}
+              </p>
+            )}
+          </Section>
+        )}
 
         {licence && (
           <Section title={strings.licence.section}>

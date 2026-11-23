@@ -55,4 +55,11 @@ pub const LICENCE_NO_DEVICE: &str =
     "This Mac could not be identified, so the key cannot be activated.";
 pub const LICENCE_REMOVE_OFFLINE: &str =
     "The licence server could not be reached, so this Mac's place on the key cannot be freed. Check your connection and try again.";
+pub const UPDATE_OFF: &str = "Updates are not switched on in this build yet.";
+pub const UPDATE_CHECK_FAILED: &str =
+    "Could not check for updates. Check your connection and try again.";
+pub const UPDATE_INSTALL_FAILED: &str =
+    "The update could not be installed. Nothing was changed; try again later.";
+pub const UPDATE_NONE: &str = "This is already the newest version.";
+pub const UPDATE_BUSY: &str = "An update is already being installed.";
 pub const TRIAL_ENDED_VIDEO: &str = "The trial has ended. Video downloads need a licence.";

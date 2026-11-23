@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { OPEN_ADD_EVENT, api, type Job, type LicenceStatus, type Settings } from "./api";
+import {
+  OPEN_ADD_EVENT,
+  UPDATE_EVENT,
+  api,
+  type Job,
+  type LicenceStatus,
+  type Settings,
+  type UpdateStatus,
+} from "./api";
 import { AddDialog } from "./components/AddDialog";
 import { DownloadRow, primaryAction } from "./components/DownloadRow";
 import { LicenceDialog } from "./components/LicenceDialog";
@@ -55,6 +63,15 @@ function Downloads() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [licenceOpen, setLicenceOpen] = useState(false);
   const [licence, setLicence] = useState<LicenceStatus | null>(null);
+  // A newer version of the app, once the core has found one.
+  const [newVersion, setNewVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    const show = (status: UpdateStatus) => setNewVersion(status.available?.version ?? null);
+    void api.updateStatus().then(show);
+    const unlisten = listen<UpdateStatus>(UPDATE_EVENT, (event) => show(event.payload));
+    return () => void unlisten.then((stop) => stop());
+  }, []);
 
   // The trial can run out while the window is open; ask again every minute.
   useEffect(() => {
@@ -279,6 +296,11 @@ function Downloads() {
           {licence && licence.state !== "licensed" && (
             <button type="button" className={secondaryButton} onClick={() => setLicenceOpen(true)}>
               {strings.licence.enter}
+            </button>
+          )}
+          {newVersion && (
+            <button type="button" className={secondaryButton} onClick={() => setSettingsOpen(true)}>
+              {strings.update.footer(newVersion)}
             </button>
           )}
           <button type="button" className={secondaryButton} onClick={() => setSettingsOpen(true)}>

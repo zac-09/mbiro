@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the universal app, signs every executable in it with the Developer ID
-# and the hardened runtime, notarises it, and produces a stapled DMG.
+# and the hardened runtime, notarises it, and produces a stapled DMG. Given the
+# updater key, it also produces the signed update and its manifest.
 #
 # The owner runs this. It never sees a secret: the certificate's private key
 # stays in the login keychain, and the notarisation credentials stay in a
@@ -17,11 +18,26 @@
 #   NOTARY_PROFILE="<profile>" \
 #   scripts/release.sh
 #
+# To make the update as well, add (see "Updates" below):
+#   TAURI_SIGNING_PRIVATE_KEY_PATH=/somewhere/safe/updater.key \
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<the key's password, or empty>" \
+#   UPDATE_BASE_URL="https://<where the update files will be served from>"
+#
 # Rehearsal without an Apple account (ad-hoc signature, no notarisation; the
 # result only runs on this Mac):
 #   SIGNING_IDENTITY=- SKIP_NOTARIZE=1 scripts/release.sh
 #
-# Not here yet: publishing the update manifest (M4).
+# Updates. One-time setup, done by hand, outside the repository:
+#   pnpm --filter @mbiro/desktop tauri signer generate -w /somewhere/safe/updater.key
+# Paste the contents of the .pub file it writes into PUBLIC_KEY in
+# apps/desktop/src-tauri/src/update.rs, and the manifest's address into
+# MANIFEST_URL there. Keep the key file safe and backed up: if it is lost,
+# installed copies can never be updated again.
+#
+# With the key given, this script leaves two more files in the output folder:
+# the update archive and latest.json. Upload the archive first, then
+# latest.json, to UPDATE_BASE_URL. The app starts offering the update as soon
+# as latest.json is there. This script uploads nothing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,6 +45,10 @@ TARGET="universal-apple-darwin"
 BUNDLE_DIR="${ROOT}/target/${TARGET}/release/bundle/macos"
 OUT_DIR="${ROOT}/target/release-artifacts"
 SKIP_NOTARIZE="${SKIP_NOTARIZE:-0}"
+# Must match TARGET in apps/desktop/src-tauri/src/update.rs.
+UPDATE_TARGET="darwin-universal"
+MAKE_UPDATE=0
+[[ -n "${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]] && MAKE_UPDATE=1
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -40,7 +60,13 @@ if [[ "${SKIP_NOTARIZE}" != "1" ]]; then
   [[ -n "${NOTARY_PROFILE:-}" ]] || die "set NOTARY_PROFILE, or SKIP_NOTARIZE=1 for a rehearsal"
   [[ "${SIGNING_IDENTITY}" != "-" ]] || die "an ad-hoc signature cannot be notarised"
 fi
-for tool in codesign hdiutil ditto lipo spctl plutil pnpm; do
+if [[ "${MAKE_UPDATE}" == "1" ]]; then
+  [[ -r "${TAURI_SIGNING_PRIVATE_KEY_PATH}" ]] || die "cannot read TAURI_SIGNING_PRIVATE_KEY_PATH"
+  [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD+set}" ]] \
+    || die "set TAURI_SIGNING_PRIVATE_KEY_PASSWORD (empty if the key has none)"
+  [[ "${UPDATE_BASE_URL:-}" == https://* ]] || die "set UPDATE_BASE_URL to an https:// address"
+fi
+for tool in codesign hdiutil ditto lipo spctl plutil pnpm node tar; do
   command -v "${tool}" >/dev/null || die "${tool} was not found"
 done
 xcrun --find notarytool >/dev/null 2>&1 || die "notarytool was not found (install Xcode Command Line Tools)"
@@ -166,9 +192,46 @@ if [[ "${SKIP_NOTARIZE}" != "1" ]]; then
   spctl --assess --type open --context context:primary-signature --verbose=2 "${DMG}"
 fi
 
+# ------------------------------------------------------------------- update
+# Made from the app as it is now: signed, and stapled if it was notarised, so
+# an updated copy is exactly what a fresh install from the DMG would be.
+if [[ "${MAKE_UPDATE}" == "1" ]]; then
+  say "Making the update"
+  ARCHIVE_NAME="${NAME}-${VERSION}-universal.app.tar.gz"
+  ARCHIVE="${OUT_DIR}/${ARCHIVE_NAME}"
+  rm -f "${ARCHIVE}" "${ARCHIVE}.sig"
+  # COPYFILE_DISABLE keeps macOS's ._ companion files out of the archive.
+  COPYFILE_DISABLE=1 tar -czf "${ARCHIVE}" -C "$(dirname "${APP}")" "$(basename "${APP}")"
+  # The signer reads the key's path and password from the environment. The
+  # version goes inside the signature, so the manifest cannot pass an old
+  # release off as a new one.
+  (cd "${ROOT}" && pnpm --filter @mbiro/desktop tauri signer sign --app-version "${VERSION}" "${ARCHIVE}" >/dev/null)
+  [[ -s "${ARCHIVE}.sig" ]] || die "the update was not signed"
+  node -e '
+    const [signatureFile, out, version, target, url] = process.argv.slice(1);
+    const fs = require("node:fs");
+    const manifest = {
+      version,
+      notes: process.env.UPDATE_NOTES ?? "",
+      pub_date: new Date().toISOString(),
+      platforms: { [target]: { signature: fs.readFileSync(signatureFile, "utf8").trim(), url } },
+    };
+    fs.writeFileSync(out, JSON.stringify(manifest, null, 2) + "\n");
+  ' "${ARCHIVE}.sig" "${OUT_DIR}/latest.json" "${VERSION}" "${UPDATE_TARGET}" \
+    "${UPDATE_BASE_URL%/}/${ARCHIVE_NAME// /%20}"
+  rm -f "${ARCHIVE}.sig"
+fi
+
 say "Done"
 echo "${DMG}"
 shasum -a 256 "${DMG}"
+if [[ "${MAKE_UPDATE}" == "1" ]]; then
+  echo "${ARCHIVE}"
+  echo "${OUT_DIR}/latest.json"
+  echo "Upload the archive, then latest.json, to ${UPDATE_BASE_URL%/}/"
+else
+  echo "No update was made: TAURI_SIGNING_PRIVATE_KEY_PATH is not set."
+fi
 if [[ "${SKIP_NOTARIZE}" == "1" ]]; then
   echo "Rehearsal only: this build is not notarised and will be blocked on any other Mac."
 fi

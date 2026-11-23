@@ -26,3 +26,8 @@ pub const TRAY_ID: &str = "menubar";
 pub const COPIED_LINK_EVENT: &str = "clipboard:link";
 /// Event asking the main window to open its add dialog with a link.
 pub const OPEN_ADD_EVENT: &str = "add:open";
+
+/// Event carrying the update status after each check of the manifest.
+pub const UPDATE_EVENT: &str = "update:status";
+/// Event carrying the progress of an update being downloaded.
+pub const UPDATE_PROGRESS_EVENT: &str = "update:progress";

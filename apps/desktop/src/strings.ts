@@ -91,6 +91,23 @@ export const strings = {
     nightlyHelp: "Newer and less tested. Turn this on if a site has stopped working.",
   },
 
+  update: {
+    section: "THIS APP",
+    version: (version: string) => `VERSION ${version}`,
+    off: "Updates are not switched on in this build.",
+    checked: (when: string) => `CHECKED ${when}`,
+    neverChecked: "NOT CHECKED YET",
+    upToDate: "UP TO DATE",
+    available: (version: string) => `VERSION ${version} IS READY`,
+    check: "CHECK NOW",
+    checking: "CHECKING…",
+    install: "INSTALL AND RESTART",
+    installing: (percent: number | null) =>
+      percent === null ? "INSTALLING…" : `INSTALLING… ${percent}%`,
+    installHelp: `${PRODUCT_NAME} closes, and opens again as the new version. Unfinished downloads carry on from where they were.`,
+    footer: (version: string) => `UPDATE TO ${version}`,
+  },
+
   licence: {
     trial: (days: number) => `TRIAL · ${days} ${days === 1 ? "DAY" : "DAYS"} LEFT`,
     expired: "TRIAL ENDED · ONE DOWNLOAD AT A TIME",

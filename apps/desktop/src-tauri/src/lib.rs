@@ -13,6 +13,7 @@ pub mod settings;
 mod shell;
 mod strings;
 pub mod tools;
+pub mod update;
 pub mod video;
 
 use std::path::PathBuf;
@@ -53,6 +54,10 @@ struct AppState {
     copied_link: Mutex<Option<String>>,
     /// Trial or licence, as last worked out.
     licence: Mutex<licence::Status>,
+    /// A newer version of the app, once a check has found one.
+    update_found: Mutex<Option<update::Found>>,
+    /// An update is being downloaded and installed.
+    updating: AtomicBool,
     /// The licence service this run talks to, if the build names one.
     licence_server: Option<String>,
     /// What stands for this Mac at the licence service.
@@ -497,6 +502,116 @@ async fn watch_for_refunds(app: AppHandle) {
     }
 }
 
+const UPDATE_CHECKED_KEY: &str = "update_checked";
+
+/// Where the app stands on updating itself, as Settings shows it.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateStatus {
+    /// False until the build names an update key and a manifest.
+    configured: bool,
+    current: String,
+    available: Option<update::Found>,
+    /// When the manifest was last read, in seconds since 1970.
+    checked_at: Option<i64>,
+}
+
+fn update_view(app: &AppHandle, state: &AppState) -> UpdateStatus {
+    UpdateStatus {
+        configured: update::configured(),
+        current: app.package_info().version.to_string(),
+        available: state.update_found.lock().expect("update lock").clone(),
+        checked_at: state
+            .manager
+            .stored(UPDATE_CHECKED_KEY)
+            .ok()
+            .flatten()
+            .and_then(|text| text.parse().ok()),
+    }
+}
+
+/// Reads the manifest, remembers the answer and tells the window.
+async fn look_for_update(app: &AppHandle) -> Result<UpdateStatus, update::UpdateError> {
+    let found = update::check(app).await?;
+    let state = app.state::<AppState>();
+    *state.update_found.lock().expect("update lock") = found;
+    let _ = state
+        .manager
+        .store(UPDATE_CHECKED_KEY, Some(&now_seconds().to_string()));
+    let view = update_view(app, &state);
+    let _ = app.emit(constants::UPDATE_EVENT, view.clone());
+    Ok(view)
+}
+
+fn update_error(error: update::UpdateError) -> String {
+    match error {
+        update::UpdateError::NotConfigured => strings::UPDATE_OFF,
+        update::UpdateError::CheckFailed => strings::UPDATE_CHECK_FAILED,
+        update::UpdateError::InstallFailed => strings::UPDATE_INSTALL_FAILED,
+        update::UpdateError::UpToDate => strings::UPDATE_NONE,
+    }
+    .to_owned()
+}
+
+#[tauri::command]
+fn update_status(app: AppHandle, state: State<'_, AppState>) -> UpdateStatus {
+    update_view(&app, &state)
+}
+
+/// "Check now" in Settings.
+#[tauri::command]
+async fn check_for_update(app: AppHandle) -> Result<UpdateStatus, String> {
+    look_for_update(&app).await.map_err(update_error)
+}
+
+/// Installs the newer version and starts it. Only ever started by the user.
+#[tauri::command]
+async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if state.updating.swap(true, Ordering::SeqCst) {
+        return Err(strings::UPDATE_BUSY.to_owned());
+    }
+    let report = |received, total| {
+        let _ = app.emit(
+            constants::UPDATE_PROGRESS_EVENT,
+            UpdateProgress { received, total },
+        );
+    };
+    let outcome = update::install(&app, report).await;
+    state.updating.store(false, Ordering::SeqCst);
+    outcome.map_err(update_error)?;
+    // Not `restart`: this way the app quits as it does for the user, so aria2
+    // saves its place and unfinished downloads resume in the new version.
+    app.request_restart();
+    Ok(())
+}
+
+#[derive(Clone, Serialize)]
+struct UpdateProgress {
+    received: u64,
+    total: Option<u64>,
+}
+
+/// Once a day, and shortly after launch if a day has passed, reads the update
+/// manifest. Finding a newer version only tells the user; installing it is
+/// theirs to start. A build with updates off never asks.
+async fn keep_app_fresh(app: AppHandle) {
+    const DAY: i64 = 24 * 60 * 60;
+    if !update::configured() {
+        return;
+    }
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    loop {
+        let checked = update_view(&app, &app.state::<AppState>())
+            .checked_at
+            .unwrap_or(0);
+        if now_seconds() - checked >= DAY {
+            // A failure (offline, say) is simply tried again in an hour.
+            let _ = look_for_update(&app).await;
+        }
+        tokio::time::sleep(Duration::from_secs(60 * 60)).await;
+    }
+}
+
 /// What the add dialog starts from.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -889,6 +1004,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let started = tauri::async_runtime::block_on(async {
@@ -928,6 +1044,8 @@ pub fn run() {
                 licence: Mutex::new(licence::Status::Trial {
                     days_left: licence::TRIAL_DAYS,
                 }),
+                update_found: Mutex::new(None),
+                updating: AtomicBool::new(false),
                 device: licence_server
                     .is_some()
                     .then(activation::device_id)
@@ -941,6 +1059,7 @@ pub fn run() {
             start_browser_integration(app.handle());
             tauri::async_runtime::spawn(keep_yt_dlp_fresh(app.handle().clone()));
             tauri::async_runtime::spawn(watch_for_refunds(app.handle().clone()));
+            tauri::async_runtime::spawn(keep_app_fresh(app.handle().clone()));
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 handle.state::<AppState>().manager.apply_speed_limit().await;
@@ -955,6 +1074,9 @@ pub fn run() {
             licence_status,
             enter_licence,
             remove_licence,
+            update_status,
+            check_for_update,
+            install_update,
             get_settings,
             set_settings,
             browser_status,
