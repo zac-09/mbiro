@@ -144,6 +144,19 @@ export interface UpdateProgress {
   total: number | null;
 }
 
+/** Mirrors `Acknowledgement` in src-tauri/src/acknowledgements.rs. */
+export interface Acknowledgement {
+  name: string;
+  version: string | null;
+  licence: string;
+  role: string;
+  /** True if it is inside the app; false if the app fetches it on request. */
+  shipped: boolean;
+  source: string;
+  licenceLink: string | null;
+  text: string | null;
+}
+
 export interface AddDefaults {
   dir: string;
   connections: number;
@@ -167,6 +180,7 @@ export const api = {
   licenceStatus: () => invoke<LicenceStatus>("licence_status"),
   enterLicence: (key: string) => invoke<LicenceStatus>("enter_licence", { key }),
   removeLicence: () => invoke<LicenceStatus>("remove_licence"),
+  acknowledgements: () => invoke<Acknowledgement[]>("acknowledgements"),
   updateStatus: () => invoke<UpdateStatus>("update_status"),
   checkForUpdate: () => invoke<UpdateStatus>("check_for_update"),
   installUpdate: () => invoke<null>("install_update"),

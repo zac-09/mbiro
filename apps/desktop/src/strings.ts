@@ -91,6 +91,21 @@ export const strings = {
     nightlyHelp: "Newer and less tested. Turn this on if a site has stopped working.",
   },
 
+  acknowledgements: {
+    row: "OPEN-SOURCE SOFTWARE",
+    rowHelp: "The programs and typefaces this app is made with, and their licences.",
+    view: "VIEW",
+    heading: "ACKNOWLEDGEMENTS",
+    body: `${PRODUCT_NAME} is made with the work of others, used under the licences below.`,
+    shipped: "INSIDE THE APP",
+    fetched: "FETCHED WHEN YOU SWITCH ON VIDEO DOWNLOADS",
+    source: "SOURCE",
+    licence: "LICENCE",
+    showText: "SHOW LICENCE",
+    hideText: "HIDE LICENCE",
+    done: "DONE",
+  },
+
   update: {
     section: "THIS APP",
     version: (version: string) => `VERSION ${version}`,

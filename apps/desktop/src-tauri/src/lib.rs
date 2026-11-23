@@ -1,6 +1,7 @@
 //! The Rust core. It owns the engines and the job list; the window only sends
 //! commands and renders the events sent from here.
 
+pub mod acknowledgements;
 pub mod activation;
 mod browsers;
 mod clipboard;
@@ -790,6 +791,12 @@ struct ToolProgress {
     total: Option<u64>,
 }
 
+/// The open-source work the app uses, with licences, for Settings.
+#[tauri::command]
+fn acknowledgements() -> Vec<acknowledgements::Acknowledgement> {
+    acknowledgements::all()
+}
+
 #[tauri::command]
 fn tools_status(state: State<'_, AppState>) -> Vec<ToolStatus> {
     let root = &state.tools_dir;
@@ -1091,6 +1098,7 @@ pub fn run() {
             pause_all,
             resume_all,
             show_file,
+            acknowledgements,
             open_main_window,
             copied_link,
             use_copied_link,

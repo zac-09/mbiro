@@ -18,6 +18,7 @@ import {
 import { clock } from "../format";
 import { strings } from "../strings";
 import { fieldLabel, primaryButton, secondaryButton } from "../ui";
+import { AcknowledgementsDialog } from "./AcknowledgementsDialog";
 import { Switch } from "./Switch";
 
 const t = strings.settings;
@@ -158,6 +159,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [updating, setUpdating] = useState(false);
   const [licence, setLicence] = useState<LicenceStatus | null>(null);
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [acknowledging, setAcknowledging] = useState(false);
   const [updateWork, setUpdateWork] = useState<"checking" | "installing" | null>(null);
   const [installed, setInstalled] = useState<UpdateProgress | null>(null);
 
@@ -472,7 +474,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               {update.configured && (
                 <>
                   <Status
-                    good={!update.available}
+                    good
                     label={
                       update.available
                         ? strings.update.available(update.available.version)
@@ -501,10 +503,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               )}
             </Row>
             {update.available?.notes && (
-              <p className="m-0 text-[12px] leading-[1.5] whitespace-pre-line text-muted select-text">
+              <p className="m-0 pb-3 text-[12px] leading-[1.5] whitespace-pre-line text-muted select-text">
                 {update.available.notes}
               </p>
             )}
+            <Row name={strings.acknowledgements.row} help={strings.acknowledgements.rowHelp}>
+              <button
+                type="button"
+                className={secondaryButton}
+                onClick={() => setAcknowledging(true)}
+              >
+                {strings.acknowledgements.view}
+              </button>
+            </Row>
           </Section>
         )}
 
@@ -554,6 +565,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
+      {acknowledging && <AcknowledgementsDialog onClose={() => setAcknowledging(false)} />}
     </dialog>
   );
 }

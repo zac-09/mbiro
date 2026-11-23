@@ -62,4 +62,15 @@ pub const UPDATE_INSTALL_FAILED: &str =
     "The update could not be installed. Nothing was changed; try again later.";
 pub const UPDATE_NONE: &str = "This is already the newest version.";
 pub const UPDATE_BUSY: &str = "An update is already being installed.";
+pub const ACK_ARIA2_ROLE: &str =
+    "Does the downloading. It is a separate program inside the app, started and stopped by it.";
+pub const ACK_ARIA2_SOURCE: &str =
+    "aria2 is free software under the GNU General Public License, version 2 or later. The copy inside this app was built, unchanged, from this source:";
+pub const ACK_ARIA2_BUILD: &str =
+    "The licence follows, then the script that built it, so that you can build the same program yourself.";
+pub const ACK_FONT_ROLE: &str = "A typeface used in the window.";
+pub const ACK_YT_DLP_ROLE: &str =
+    "Finds and fetches video from a page. Kept up to date by the app, so its version is shown under Video tools in Settings.";
+pub const ACK_DENO_ROLE: &str = "Runs the scripts yt-dlp needs for some pages.";
+pub const ACK_FFMPEG_ROLE: &str = "Joins separate video and sound into one file.";
 pub const TRIAL_ENDED_VIDEO: &str = "The trial has ended. Video downloads need a licence.";
