@@ -1,0 +1,83 @@
+# Lint and test on every push (PLAN.md section 11).
+#
+# Uses no secrets and signs nothing. Signed release builds on tags are a
+# separate workflow, not written yet: they need the Apple Developer ID.
+#
+# Every action is pinned to a commit; the comment beside it names the release.
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint and test
+    # The app is macOS-only, and its tests run the real aria2c.
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Reads the pnpm version from "packageManager" in package.json.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20.20.2"
+          cache: pnpm
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint and format check (TypeScript)
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (TypeScript)
+        run: pnpm test
+
+      # The Rust version, components and both targets come from
+      # rust-toolchain.toml; rustup installs them on first use.
+      - name: Install the Rust toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # aria2c is built from pinned source and takes a long time, so it is
+      # kept until the build script changes.
+      - name: Restore aria2c
+        id: aria2
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/src-tauri/binaries/aria2c-*
+          key: aria2c-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-aria2.sh') }}
+
+      - name: Build aria2c
+        if: steps.aria2.outputs.cache-hit != 'true'
+        run: scripts/build-aria2.sh
+
+      - name: Build the native messaging host
+        run: scripts/build-nm-host.sh
+
+      # The core embeds the built window, so it must exist before Rust compiles.
+      - name: Build the window
+        run: pnpm --filter @mbiro/desktop build:ui
+
+      - name: Format check, lint and test (Rust)
+        run: pnpm check:rust
+
+      - name: Check the app against the licence service
+        run: scripts/test-licence-service.sh
