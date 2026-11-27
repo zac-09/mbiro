@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  LICENCE_LINK_EVENT,
   OPEN_ADD_EVENT,
   UPDATE_EVENT,
   api,
@@ -62,6 +63,8 @@ function Downloads() {
   const [adding, setAdding] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [licenceOpen, setLicenceOpen] = useState(false);
+  // A key brought by the activation link in the licence email.
+  const [linkedKey, setLinkedKey] = useState<string | null>(null);
   const [licence, setLicence] = useState<LicenceStatus | null>(null);
   // A newer version of the app, once the core has found one.
   const [newVersion, setNewVersion] = useState<string | null>(null);
@@ -89,6 +92,20 @@ function Downloads() {
   // The menu bar popover hands over a copied link the user chose to download.
   useEffect(() => {
     const unlisten = listen<string>(OPEN_ADD_EVENT, (event) => setAdding(event.payload));
+    return () => void unlisten.then((stop) => stop());
+  }, []);
+
+  // The link in the licence email opens the app with the key. It may have
+  // arrived before this window was listening, so ask once as well.
+  useEffect(() => {
+    const take = () =>
+      void api.takeLicenceLink().then((key) => {
+        if (!key) return;
+        setLinkedKey(key);
+        setLicenceOpen(true);
+      });
+    take();
+    const unlisten = listen(LICENCE_LINK_EVENT, take);
     return () => void unlisten.then((stop) => stop());
   }, []);
 
@@ -312,7 +329,16 @@ function Downloads() {
       {adding !== null && <AddDialog initialUrl={adding} onClose={() => setAdding(null)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {licenceOpen && (
-        <LicenceDialog onClose={() => setLicenceOpen(false)} onActivated={setLicence} />
+        <LicenceDialog
+          // A second link while the dialog is open starts it afresh.
+          key={linkedKey ?? "typed"}
+          linkedKey={linkedKey ?? undefined}
+          onClose={() => {
+            setLicenceOpen(false);
+            setLinkedKey(null);
+          }}
+          onActivated={setLicence}
+        />
       )}
     </div>
   );

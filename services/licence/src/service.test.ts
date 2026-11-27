@@ -1,4 +1,10 @@
-import { generateKeyPairSync, verify as verifySignature, createPublicKey } from "node:crypto";
+import {
+  createHash,
+  generateKeyPairSync,
+  verify as verifySignature,
+  createPublicKey,
+} from "node:crypto";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { issueKey, keyId, loadSigner, readKey } from "./keys";
 import type { Message } from "./mail";
@@ -13,7 +19,7 @@ const throwaway = () =>
 const SECRET = "a-secret-for-tests-only";
 const device = (n: number) => n.toString(16).padStart(64, "0");
 
-function setUp(options: { mailFails?: boolean } = {}) {
+function setUp(options: { mailFails?: boolean; publicUrl?: string } = {}) {
   const signer = loadSigner(throwaway());
   const sent: Message[] = [];
   const state = { mailFails: options.mailFails ?? false, now: new Date("2026-11-23T10:00:00Z") };
@@ -28,6 +34,7 @@ function setUp(options: { mailFails?: boolean } = {}) {
       },
     },
     adapters: [stubAdapter(SECRET)],
+    publicUrl: options.publicUrl,
     now: () => state.now,
   });
   const post = async (path: string, body: unknown, headers: Record<string, string> = {}) => {
@@ -229,5 +236,79 @@ describe("purchases and refunds", () => {
       401,
     );
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("the activation link", () => {
+  const purchase = { kind: "purchase", order: "1", email: "buyer@example.com", plan: "standard" };
+
+  it("is in the email when the service knows its address, with the key after the #", async () => {
+    const { webhook, emailedKey, sent } = setUp({ publicUrl: "https://licence.test/" });
+    await webhook(purchase);
+    const key = emailedKey();
+    expect(sent.at(-1)?.text.split("\n")).toContain(`https://licence.test/activate#${key}`);
+  });
+
+  it("is left out when the service does not know its address", async () => {
+    const { webhook, emailedKey, sent } = setUp();
+    await webhook(purchase);
+    expect(emailedKey()).toBeTruthy();
+    expect(sent.at(-1)?.text).not.toContain("/activate");
+  });
+
+  it("leads to a page that hands a key-shaped fragment to the app and runs nothing else", async () => {
+    const { service } = setUp();
+    const response = await service(new Request("https://licence.test/activate"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    const page = await response.text();
+    expect(page).toContain('"mbiro://activate?key="');
+
+    // The policy allows exactly the page's own script and style.
+    const policy = response.headers.get("content-security-policy") ?? "";
+    const inline = (tag: string) =>
+      new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(page)?.[1] ?? "";
+    for (const tag of ["script", "style"]) {
+      const digest = createHash("sha256").update(inline(tag)).digest("base64");
+      expect(policy).toContain(`${tag}-src 'sha256-${digest}'`);
+    }
+    expect(policy).toContain("default-src 'none'");
+  });
+
+  it("page script: passes on a key, and nothing that is not shaped like one", async () => {
+    const { service } = setUp();
+    const page = await (await service(new Request("https://licence.test/activate"))).text();
+    const script = /<script>([\s\S]*?)<\/script>/.exec(page)?.[1] ?? "";
+    /** Runs the page's script against a stand-in for the browser. */
+    const open = (fragment: string) => {
+      const elements: Record<string, { hidden: boolean; href?: string }> = {
+        found: { hidden: true },
+        missing: { hidden: true },
+        open: { hidden: false },
+      };
+      const location = { hash: fragment, pathname: "/activate", href: "" };
+      const bar: string[] = [];
+      runInNewContext(script, {
+        location,
+        document: { getElementById: (id: string) => elements[id] },
+        history: { replaceState: (_: unknown, __: string, to: string) => bar.push(to) },
+      });
+      return { elements, location, bar };
+    };
+
+    const good = open("#eyJ_a-1.c2ln");
+    expect(good.location.href).toBe("mbiro://activate?key=eyJ_a-1.c2ln");
+    expect(good.elements.open?.href).toBe("mbiro://activate?key=eyJ_a-1.c2ln");
+    expect(good.elements.found?.hidden).toBe(false);
+    // The key is taken out of the address bar.
+    expect(good.bar).toEqual(["/activate"]);
+
+    for (const fragment of ["", "#", "#nodot", "#a.b.c", "#a b.c", "#<img src=x>.c", "#a.b&x=1"]) {
+      const bad = open(fragment);
+      expect(bad.location.href).toBe("");
+      expect(bad.elements.missing?.hidden).toBe(false);
+      expect(bad.elements.found?.hidden).toBe(true);
+    }
   });
 });

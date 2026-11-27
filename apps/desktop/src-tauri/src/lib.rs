@@ -448,6 +448,33 @@ async fn enter_licence(state: State<'_, AppState>, key: String) -> Result<licenc
     Ok(refresh_licence(&state))
 }
 
+/// A key brought by an activation link, until the main window takes it.
+/// Kept apart from the rest of the state because a link that launches the
+/// app can arrive before the core has started.
+#[derive(Default)]
+struct LicenceLink(Mutex<Option<String>>);
+
+/// An activation link was opened, from the licence email or anywhere else.
+/// The key waits for the main window, which activates it the same way as a
+/// pasted one.
+fn open_licence_link(app: &AppHandle, link: &url::Url) {
+    let Some(key) = licence::key_in_link(link, constants::URL_SCHEME) else {
+        return;
+    };
+    *app.state::<LicenceLink>().0.lock().expect("link lock") = Some(key);
+    shell::show_main_window(app);
+    let _ = app.emit_to(constants::MAIN_WINDOW, constants::LICENCE_LINK_EVENT, ());
+}
+
+/// Hands the main window the key an activation link brought, once. A Mac that
+/// already has a licence keeps it: the link is dropped.
+#[tauri::command]
+fn take_licence_link(link: State<'_, LicenceLink>, state: State<'_, AppState>) -> Option<String> {
+    let key = link.0.lock().expect("link lock").take()?;
+    let licensed = matches!(refresh_licence(&state), licence::Status::Licensed { .. });
+    (!licensed).then_some(key)
+}
+
 /// Forgets the licence on this Mac and gives its place back, so the key can
 /// be used on another.
 #[tauri::command]
@@ -1019,6 +1046,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(LicenceLink::default())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let started = tauri::async_runtime::block_on(async {
@@ -1088,6 +1116,7 @@ pub fn run() {
             licence_status,
             enter_licence,
             remove_licence,
+            take_licence_link,
             update_status,
             check_for_update,
             install_update,
@@ -1132,6 +1161,13 @@ pub fn run() {
         }
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => shell::show_main_window(app),
+        // A link with our scheme was clicked (Info.plist claims the scheme).
+        #[cfg(target_os = "macos")]
+        RunEvent::Opened { urls } => {
+            for link in &urls {
+                open_licence_link(app, link);
+            }
+        }
         RunEvent::Exit => {
             // aria2 saves its control files on the way out, so partial
             // downloads resume after the next launch.

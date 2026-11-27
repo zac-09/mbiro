@@ -9,6 +9,7 @@ Activates licence keys, issues them when someone buys, and lists refunded ones
 | `POST /v1/deactivate`          | Frees that place.                                                |
 | `GET /v1/revoked`              | Lists the ids of refunded licences.                              |
 | `POST /v1/payments/<provider>` | A payment provider's webhook: a purchase or a refund.            |
+| `GET /activate`                | The page behind the activation link in the licence email.        |
 
 A licence key and a receipt are both `<payload>.<signature>`, signed with the
 Ed25519 private key that `scripts/licence-keygen.sh` makes. The app holds the
@@ -28,8 +29,19 @@ that depend on decisions not made yet:
   real provider needs an adapter that checks its webhook signature.
 - **A mailer** (`src/mail.ts`). None exists; the local run prints the email.
 
-Also not here: rate limiting (left to the host), and the one-click activation
-link in the email (the app does not open links to itself yet).
+Also not here: rate limiting (left to the host).
+
+## The activation link
+
+When the service is given its own address (`publicUrl`), the licence email
+carries a link, `<publicUrl>/activate#<key>`. The page it opens passes the key
+to the app as `mbiro://activate?key=<key>`, and the app activates it like a
+pasted key. The email uses an ordinary https link because mail programs do not
+reliably make a link with an app's own scheme clickable.
+
+The key sits after the `#`, which browsers do not send to servers, so opening
+the link does not show the key to this service or its logs. A Mac that already
+has a licence ignores activation links.
 
 ## Run it locally
 

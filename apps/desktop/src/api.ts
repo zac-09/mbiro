@@ -167,6 +167,8 @@ export const SNAPSHOT_EVENT = "downloads:snapshot";
 export const TOOL_PROGRESS_EVENT = "tools:progress";
 export const COPIED_LINK_EVENT = "clipboard:link";
 export const OPEN_ADD_EVENT = "add:open";
+/** Sent when an activation link has brought a key (`take_licence_link` has it). */
+export const LICENCE_LINK_EVENT = "licence:link";
 export const UPDATE_EVENT = "update:status";
 export const UPDATE_PROGRESS_EVENT = "update:progress";
 
@@ -180,6 +182,8 @@ export const api = {
   licenceStatus: () => invoke<LicenceStatus>("licence_status"),
   enterLicence: (key: string) => invoke<LicenceStatus>("enter_licence", { key }),
   removeLicence: () => invoke<LicenceStatus>("remove_licence"),
+  /** The key an activation link brought, if one is waiting. It is handed over once. */
+  takeLicenceLink: () => invoke<string | null>("take_licence_link"),
   acknowledgements: () => invoke<Acknowledgement[]>("acknowledgements"),
   libraryLicences: () => invoke<string>("library_licences"),
   updateStatus: () => invoke<UpdateStatus>("update_status"),

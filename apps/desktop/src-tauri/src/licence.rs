@@ -25,6 +25,29 @@ use sha2::{Digest, Sha256};
 /// key can be accepted, and the app says so.
 pub const PUBLIC_KEY: Option<&str> = None;
 
+/// The longest key a link may carry. Real keys are a few hundred characters.
+const MAX_LINKED_KEY: usize = 2048;
+
+/// The licence key in an activation link, `<scheme>://activate?key=<key>`,
+/// as the licence email's link opens it. Any web page can open such a link,
+/// so nothing but the shape of a key gets through; whether it is a real key
+/// is checked afterwards like a pasted one.
+pub fn key_in_link(link: &url::Url, scheme: &str) -> Option<String> {
+    if link.scheme() != scheme || link.host_str() != Some("activate") {
+        return None;
+    }
+    let (_, key) = link.query_pairs().find(|(name, _)| name == "key")?;
+    let shaped = key.len() <= MAX_LINKED_KEY
+        && key.split('.').count() == 2
+        && key.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        });
+    shaped.then(|| key.into_owned())
+}
+
 pub const TRIAL_DAYS: i64 = 14;
 const DAY: i64 = 24 * 60 * 60;
 
@@ -224,6 +247,37 @@ mod tests {
         let public =
             base64::engine::general_purpose::STANDARD.encode(signing.verifying_key().to_bytes());
         (signing, public)
+    }
+
+    #[test]
+    fn an_activation_link_gives_up_its_key_and_nothing_else_does() {
+        let key_in = |link: &str| key_in_link(&url::Url::parse(link).unwrap(), "mbiro");
+        assert_eq!(
+            key_in("mbiro://activate?key=eyJ_a-1.c2ln"),
+            Some("eyJ_a-1.c2ln".to_owned())
+        );
+        // Another scheme, another action, no key, or something not key-shaped.
+        assert_eq!(key_in("https://activate?key=eyJ.c2ln"), None);
+        assert_eq!(key_in("mbiro://download?key=eyJ.c2ln"), None);
+        assert_eq!(key_in("mbiro://activate"), None);
+        assert_eq!(key_in("mbiro://activate?key="), None);
+        assert_eq!(key_in("mbiro://activate?key=nodot"), None);
+        assert_eq!(key_in("mbiro://activate?key=a.b.c"), None);
+        assert_eq!(key_in("mbiro://activate?key=a%20b.c"), None);
+        assert_eq!(key_in("mbiro://activate?key=%3Cscript%3E.c"), None);
+        let long = format!("mbiro://activate?key={}.c", "a".repeat(MAX_LINKED_KEY));
+        assert_eq!(key_in(&long), None);
+    }
+
+    #[test]
+    fn the_bundle_claims_the_scheme_the_links_use() {
+        let plist = include_str!("../Info.plist");
+        let scheme = crate::constants::URL_SCHEME;
+        assert!(plist.contains(&format!("<string>{scheme}</string>")));
+        assert!(plist.contains(&format!(
+            "<string>{}</string>",
+            crate::constants::BUNDLE_IDENTIFIER
+        )));
     }
 
     /// A check with no licence server in the build.

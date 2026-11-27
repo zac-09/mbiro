@@ -7,6 +7,7 @@
  *   POST /v1/deactivate          {key, device}  -> {ok}
  *   GET  /v1/revoked                            -> {revoked: [licence id]}
  *   POST /v1/payments/<provider>  a provider's webhook
+ *   GET  /activate                              the page behind the email's link
  *
  * The app's side of the first three is apps/desktop/src-tauri/src/activation.rs.
  * Nothing here logs a key, an email address or a device.
@@ -14,6 +15,7 @@
 import { z } from "zod";
 import { issueKey, issueReceipt, keyId, readKey, type Signer } from "./keys";
 import type { Mailer } from "./mail";
+import { activationLink, activationPage } from "./page";
 import type { PaymentAdapter, PaymentEvent } from "./payments";
 import type { Store } from "./store";
 import { strings } from "./strings";
@@ -27,6 +29,12 @@ export interface ServiceOptions {
   store: Store;
   mailer: Mailer;
   adapters: PaymentAdapter[];
+  /**
+   * Where buyers reach this service, such as "https://licence.example". With
+   * it, the licence email carries a one-click activation link; without it,
+   * only the key.
+   */
+  publicUrl?: string;
   /** The clock, so tests can set it. */
   now?: () => Date;
 }
@@ -121,7 +129,12 @@ export function createService(options: ServiceOptions): (request: Request) => Pr
         await mailer.send({
           to: order.email,
           subject: strings.licenceEmail.subject,
-          text: strings.licenceEmail.body(order.key, licence, DEVICE_LIMIT),
+          text: strings.licenceEmail.body(
+            order.key,
+            licence,
+            DEVICE_LIMIT,
+            options.publicUrl ? activationLink(options.publicUrl, order.key) : null,
+          ),
         });
       } catch {
         // An error status makes the provider try again later.
@@ -155,6 +168,7 @@ export function createService(options: ServiceOptions): (request: Request) => Pr
       if (request.method === "GET" && pathname === "/v1/revoked") {
         return reply(200, { revoked: await store.revoked() });
       }
+      if (request.method === "GET" && pathname === "/activate") return activationPage();
       const provider = /^\/v1\/payments\/([a-z0-9-]{1,32})$/.exec(pathname)?.[1];
       if (request.method === "POST" && provider) return await payment(provider, request);
       return refuse(404, "not_found");

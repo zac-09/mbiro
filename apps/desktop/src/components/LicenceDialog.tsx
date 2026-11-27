@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { api, type LicenceStatus } from "../api";
 import { strings } from "../strings";
 import { fieldLabel, primaryButton, secondaryButton } from "../ui";
@@ -7,37 +7,55 @@ const t = strings.licence;
 
 interface Props {
   onClose: () => void;
+  /** A key brought by an activation link: it is activated without a click. */
+  linkedKey?: string;
   /** Called with the new status once a key has been accepted. */
   onActivated: (status: LicenceStatus) => void;
 }
 
 /** Where a licence key is pasted. The core checks it and activates it. */
-export function LicenceDialog({ onClose, onActivated }: Props) {
+export function LicenceDialog({ onClose, linkedKey, onActivated }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [key, setKey] = useState("");
+  const [key, setKey] = useState(linkedKey ?? "");
   const [error, setError] = useState<string | null>(null);
   // Activation asks the licence server, which can take a few seconds.
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(Boolean(linkedKey));
 
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
+
+  const send = useCallback(
+    (entered: string) => {
+      api
+        .enterLicence(entered)
+        .then((status) => {
+          onActivated(status);
+          onClose();
+        })
+        .catch((reason: unknown) => {
+          setError(String(reason));
+          setBusy(false);
+        });
+    },
+    [onActivated, onClose],
+  );
+
+  // A linked key is sent once, as the dialog opens. If that fails the key
+  // stays in the field with the reason, to try again or cancel.
+  const sent = useRef(false);
+  useEffect(() => {
+    if (!linkedKey || sent.current) return;
+    sent.current = true;
+    send(linkedKey);
+  }, [linkedKey, send]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!key.trim() || busy) return;
     setError(null);
     setBusy(true);
-    api
-      .enterLicence(key)
-      .then((status) => {
-        onActivated(status);
-        onClose();
-      })
-      .catch((reason: unknown) => {
-        setError(String(reason));
-        setBusy(false);
-      });
+    send(key);
   };
 
   return (

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the app's Info.plist by the Tauri bundler. It claims the URL
+     scheme the licence email's activation link uses. The scheme is a
+     placeholder, and must match URL_SCHEME in crates/common/src/constants.rs;
+     a test in src/licence.rs checks that it does. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>dev.mbiro.app</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>mbiro</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

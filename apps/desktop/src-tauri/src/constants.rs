@@ -31,3 +31,6 @@ pub const OPEN_ADD_EVENT: &str = "add:open";
 pub const UPDATE_EVENT: &str = "update:status";
 /// Event carrying the progress of an update being downloaded.
 pub const UPDATE_PROGRESS_EVENT: &str = "update:progress";
+
+/// Event telling the main window that an activation link has brought a key.
+pub const LICENCE_LINK_EVENT: &str = "licence:link";

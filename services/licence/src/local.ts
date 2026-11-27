@@ -33,14 +33,16 @@ const printer: Mailer = {
     return Promise.resolve();
   },
 };
+const port = Number(process.env.PORT ?? 8787);
 const service = createService({
   signer,
   store: new MemoryStore(),
   mailer: printer,
   adapters: [stubAdapter(need("STUB_PAYMENT_SECRET"))],
+  // The emailed activation link then opens this machine's copy of the page.
+  publicUrl: `http://127.0.0.1:${port}`,
 });
 
-const port = Number(process.env.PORT ?? 8787);
 createServer((incoming, outgoing) => {
   const chunks: Buffer[] = [];
   incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
